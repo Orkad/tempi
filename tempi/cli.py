@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import logging
+import os
+import shutil
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -15,7 +19,26 @@ from pathlib import Path
 from . import __version__
 from .collector import Collector, RetentionThread, apply_retention
 from .config import Config
-from .sensor import SensorError, make_bus
+from .diagnostics import (
+    DEFAULT_W1_GPIO,
+    BusInventory,
+    Check,
+    classify_devices,
+    diagnose_bus,
+    diagnose_gpio,
+    parse_modules,
+    parse_overlay,
+    parse_pinctrl,
+    summarise,
+)
+from .sensor import (
+    CrcError,
+    OutOfRangeError,
+    ResetValueError,
+    SensorError,
+    W1Bus,
+    make_bus,
+)
 from .storage import Storage
 from .web import parse_duration, parse_timestamp, serve
 
@@ -113,6 +136,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = subparsers.add_parser("stats", help="affiche l'état de la base")
     sub.set_defaults(func=cmd_stats)
+
+    sub = subparsers.add_parser(
+        "doctor", help="diagnostique le bus 1-Wire et nomme la panne"
+    )
+    sub.add_argument("--json", action="store_true", help="sortie exploitable par un script")
+    sub.set_defaults(func=cmd_doctor)
 
     return parser
 
@@ -321,6 +350,274 @@ def cmd_stats(args: argparse.Namespace, config: Config) -> int:
             label = f" « {sensor['label']} »" if sensor["label"] else ""
             print(f"  {sensor['address']}{label} : {sensor['count']} mesure(s)")
     return 0
+
+
+# -- diagnostic -------------------------------------------------------------
+
+#: Même ordre que scripts/install.sh : Bookworm d'abord, versions antérieures ensuite.
+BOOT_CONFIGS = (Path("/boot/firmware/config.txt"), Path("/boot/config.txt"))
+
+
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_text()
+    except OSError:
+        return None
+
+
+def _check_overlay() -> tuple[Check, int]:
+    """Vérifie l'activation du 1-Wire et retourne le GPIO effectivement utilisé."""
+    for path in BOOT_CONFIGS:
+        text = _read_text(path)
+        if text is None:
+            continue
+        enabled, gpio = parse_overlay(text)
+        if enabled:
+            return Check("Overlay 1-Wire", True, f"GPIO {gpio}, déclaré dans {path}"), gpio
+        return (
+            Check(
+                "Overlay 1-Wire",
+                False,
+                f"absent de {path}",
+                "Lancez « sudo raspi-config » (Interface Options > 1-Wire), ou ajoutez "
+                "« dtoverlay=w1-gpio », puis redémarrez.",
+                critical=True,
+            ),
+            gpio,
+        )
+    return (
+        Check("Overlay 1-Wire", None, "aucun config.txt lisible sur cette machine"),
+        DEFAULT_W1_GPIO,
+    )
+
+
+def _check_modules() -> Check:
+    text = _read_text(Path("/proc/modules"))
+    if text is None:
+        return Check("Modules noyau", None, "/proc/modules illisible")
+    loaded = parse_modules(text)
+    missing = [name for name in ("w1_gpio", "w1_therm") if name not in loaded]
+    if missing:
+        return Check(
+            "Modules noyau",
+            False,
+            f"absent(s) : {', '.join(missing)}",
+            "« sudo modprobe w1-gpio w1-therm ». S'ils refusent de se charger, "
+            "l'overlay n'est pas actif : il faut redémarrer.",
+            critical=True,
+        )
+    return Check("Modules noyau", True, "w1_gpio et w1_therm chargés")
+
+
+def _list_devices(w1_dir: Path) -> list[str]:
+    try:
+        return [entry.name for entry in w1_dir.iterdir()]
+    except OSError:
+        return []
+
+
+def _rescan(w1_dir: Path) -> bool:
+    """Force un nouveau balayage du bus. Retourne False si les droits manquent."""
+    masters = sorted(w1_dir.glob("w1_bus_master*"))
+    if not masters:
+        return False
+    for master in masters:
+        try:
+            (master / "w1_master_search").write_text("1\n")
+        except OSError:
+            return False
+    return True
+
+
+def _read_gpio(gpio: int) -> tuple[str | None, str | None]:
+    """Retourne (niveau, fonction) de la ligne, via pinctrl ou raspi-gpio."""
+    for tool in ("pinctrl", "raspi-gpio"):
+        binary = shutil.which(tool)
+        if binary is None:
+            continue
+        try:
+            result = subprocess.run(
+                [binary, "get", str(gpio)], capture_output=True, text=True, timeout=5
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        parsed = parse_pinctrl(result.stdout)
+        if parsed is not None:
+            function, level = parsed
+            return level, function
+    return None, None
+
+
+def _check_sensor_reads(bus: W1Bus, addresses: list[str]) -> list[Check]:
+    """Lit chaque capteur détecté et traduit l'échec éventuel en geste correctif."""
+    checks: list[Check] = []
+    for address in addresses:
+        name = f"Lecture {address}"
+        try:
+            celsius = bus.read(address)
+        except CrcError:
+            checks.append(
+                Check(
+                    name,
+                    False,
+                    "CRC invalide à chaque tentative",
+                    "Contact incertain ou câble trop long : raccourcissez la liaison, "
+                    "ou descendez la résistance de tirage à 2,2 kΩ.",
+                    critical=True,
+                )
+            )
+        except ResetValueError:
+            checks.append(
+                Check(
+                    name,
+                    False,
+                    "valeur de reset 85 °C",
+                    "Alimentation insuffisante : alimentez le capteur en 3,3 V plutôt "
+                    "qu'en parasite.",
+                    critical=True,
+                )
+            )
+        except OutOfRangeError as exc:
+            checks.append(
+                Check(
+                    name,
+                    False,
+                    str(exc),
+                    "Valeur hors de la plage du capteur : la ligne de données est perturbée.",
+                    critical=True,
+                )
+            )
+        except SensorError as exc:
+            checks.append(Check(name, False, str(exc), critical=True))
+        else:
+            checks.append(Check(name, True, f"{celsius:.3f} °C"))
+    return checks
+
+
+def _check_storage(config: Config) -> Check:
+    if config.db_path.exists():
+        if os.access(config.db_path, os.W_OK):
+            return Check("Stockage", True, f"{config.db_path} accessible en écriture")
+        return Check(
+            "Stockage",
+            False,
+            f"{config.db_path} non inscriptible",
+            "Vérifiez le propriétaire du fichier.",
+            critical=True,
+        )
+    parent = config.db_path.parent
+    if parent.is_dir() and os.access(parent, os.W_OK):
+        return Check("Stockage", True, f"{parent} accessible, base à créer")
+    return Check(
+        "Stockage",
+        False,
+        f"{parent} non inscriptible",
+        "Créez ce répertoire ou corrigez ses droits.",
+        critical=True,
+    )
+
+
+def _check_service() -> Check:
+    binary = shutil.which("systemctl")
+    if binary is None:
+        return Check("Service", None, "systemctl absent")
+    try:
+        result = subprocess.run(
+            [binary, "is-active", "tempi"], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.SubprocessError):
+        return Check("Service", None, "état indéterminable")
+    state = result.stdout.strip() or "inconnu"
+    if state == "active":
+        return Check("Service", True, "tempi.service actif")
+    # Non critique : « tempi doctor » sert justement à préparer le terrain avant
+    # de lancer le service.
+    return Check(
+        "Service",
+        None,
+        f"tempi.service : {state}",
+        "« sudo systemctl start tempi » si vous l'attendiez en marche.",
+    )
+
+
+def cmd_doctor(args: argparse.Namespace, config: Config) -> int:
+    if config.simulate:
+        print("Mode simulé : les vérifications matérielles sont sans objet.\n", file=sys.stderr)
+
+    checks: list[Check] = []
+
+    overlay_check, gpio = _check_overlay()
+    checks.append(overlay_check)
+    checks.append(_check_modules())
+
+    bus = W1Bus(
+        w1_dir=config.w1_dir,
+        retries=config.read_retries,
+        allow_reset_value=config.allow_reset_value,
+    )
+    if bus.available():
+        checks.append(Check("Répertoire 1-Wire", True, str(config.w1_dir)))
+    else:
+        checks.append(
+            Check(
+                "Répertoire 1-Wire",
+                False,
+                f"{config.w1_dir} absent",
+                "Le bus n'est pas monté : activez l'overlay puis redémarrez.",
+                critical=True,
+            )
+        )
+
+    inventory = classify_devices(_list_devices(config.w1_dir))
+
+    # Un second balayage ne sert que si le bus ne renvoie que des fantômes :
+    # c'est leur stabilité qui distingue une ligne à la masse d'une ligne flottante.
+    second: BusInventory | None = None
+    if inventory.phantoms and not inventory.sensors:
+        if _rescan(config.w1_dir):
+            time.sleep(1.5)
+            second = classify_devices(_list_devices(config.w1_dir))
+        else:
+            checks.append(
+                Check(
+                    "Second balayage",
+                    None,
+                    "droits insuffisants pour relancer une recherche",
+                    "Relancez avec sudo pour distinguer une ligne à la masse d'une "
+                    "ligne flottante.",
+                )
+            )
+
+    level, function = _read_gpio(gpio)
+    checks.append(diagnose_bus(inventory, second, level))
+    checks.append(diagnose_gpio(level, function))
+    checks.extend(_check_sensor_reads(bus, inventory.sensors))
+    checks.append(_check_storage(config))
+    checks.append(_check_service())
+
+    ok, message = summarise(checks)
+
+    if args.json:
+        print(
+            json.dumps(
+                {"ok": ok, "summary": message, "checks": [c.as_dict() for c in checks]},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if ok else 1
+
+    width = max(len(check.name) for check in checks)
+    for check in checks:
+        print(f"  {check.symbol}  {check.name.ljust(width)}  {check.detail}")
+    print()
+    if ok:
+        print(message)
+    else:
+        print("Cause la plus probable")
+        print("──────────────────────")
+        print(message)
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
