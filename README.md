@@ -65,18 +65,66 @@ autre piste : c'est la cause de loin la plus fréquente.
 
 ## 3. Installation
 
+### Authentification
+
+Le dépôt étant privé, le clonage depuis le Raspberry Pi demande un **jeton
+d'accès personnel** : GitHub n'accepte plus le mot de passe du compte depuis
+août 2021.
+
+**1. Créer le jeton** depuis un navigateur — l'application mobile GitHub
+n'expose pas ces réglages : <https://github.com/settings/personal-access-tokens/new>
+
+| Champ | Valeur |
+|---|---|
+| Repository access | *Only select repositories* → `Orkad/tempi` |
+| Permissions → Repository → Contents | *Read-only* |
+| Expiration | à votre convenance |
+
+Un accès en lecture à ce seul dépôt suffit : le Pi ne fait que récupérer du
+code. Un jeton plus large serait un risque inutile sur une machine allumée en
+permanence.
+
+**2. Cloner** sur le Pi :
+
 ```bash
-git clone https://github.com/orkad/tempi.git
-cd tempi
+git config --global credential.helper store
+git clone https://github.com/Orkad/tempi.git ~/tempi
+```
+
+Git demande l'identifiant GitHub puis le jeton, à coller à la place du mot de
+passe — rien ne s'affiche pendant la saisie, c'est normal. Le jeton est ensuite
+conservé dans `~/.git-credentials`, lisible par vous seul, et n'est plus
+redemandé.
+
+> Ce fichier contient le jeton **en clair**. C'est le compromis habituel sur une
+> machine sans session graphique, faute de trousseau chiffré disponible. Si le
+> Raspberry Pi est partagé avec d'autres utilisateurs, préférez une clé SSH.
+
+### Installer
+
+```bash
+cd ~/tempi
 sudo ./scripts/install.sh
 ```
 
 Le script active le 1-Wire si besoin, crée l'utilisateur système `tempi`,
 installe l'application dans `/opt/tempi/venv`, dépose la configuration dans
-`/etc/tempi/tempi.env` et démarre le service.
+`/etc/tempi/tempi.env` et démarre le service. Il est idempotent : le relancer
+met à jour l'installation sans écraser votre configuration.
 
 L'interface est alors disponible sur <http://127.0.0.1:8080/>. Pour la rendre
 accessible depuis le réseau local, voir la section [Accès réseau](#7-accès-réseau).
+
+### Mettre à jour
+
+```bash
+~/tempi/scripts/update.sh
+```
+
+Récupère les modifications, réinstalle et redémarre le service. À lancer **sans**
+`sudo` : le dépôt et le jeton appartiennent à votre compte, et le script appelle
+`sudo` lui-même pour la seule partie qui en a besoin. Si rien n'a changé, il
+s'arrête sans toucher au service.
 
 ### Sans installation
 
