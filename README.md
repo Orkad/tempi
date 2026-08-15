@@ -104,6 +104,7 @@ pour découvrir l'interface depuis un poste de développement.
 ## 4. Utilisation
 
 ```bash
+tempi doctor                     # diagnostique le bus et nomme la panne
 tempi sensors                    # capteurs détectés et capteurs connus de la base
 tempi read                       # lecture immédiate, sans rien enregistrer
 tempi collect                    # boucle de collecte seule
@@ -233,12 +234,42 @@ difficulté un rédacteur et plusieurs lecteurs simultanés.
 
 ## 9. Dépannage
 
+Commencez toujours par :
+
+```bash
+sudo tempi doctor
+```
+
+La commande vérifie l'overlay, les modules noyau, l'état du bus, le niveau
+électrique de la ligne de données, la lecture de chaque capteur, le stockage et
+le service. Elle nomme la panne et donne le geste correctif, et sort avec un code
+non nul en cas d'échec — utilisable dans un script. `--json` produit une sortie
+exploitable.
+
+Le `sudo` n'est pas obligatoire, mais il permet un second balayage du bus, seul
+moyen de distinguer une ligne à la masse d'une ligne flottante.
+
+### Lire les périphériques fantômes
+
+Un bus en défaut enregistre malgré tout des périphériques, de famille `00`.
+**Ce ne sont pas des capteurs** : leur forme désigne la panne.
+
+| Contenu de `/sys/bus/w1/devices/` | Cause |
+|---|---|
+| `w1_bus_master1` seul | le bus fonctionne mais ne voit rien : la donnée n'atteint pas le capteur, ou il n'est pas alimenté |
+| Rien du tout | 1-Wire non activé, ou modules non chargés — un redémarrage est nécessaire après l'activation |
+| `00-800000000000`, constant | ligne de données **tenue à la masse** : donnée et masse dans la même rangée, résistance branchée sur GND au lieu du 3,3 V, ou capteur à l'envers |
+| ROM en `00-…` qui **changent** à chaque balayage | ligne de données **flottante** : la résistance de 4,7 kΩ ne relie pas la donnée au 3,3 V |
+| Un `28-…` **et** des `00-…` | le capteur répond mais le bus est bruité : raccourcissez le câble, ou descendez la résistance à 2,2 kΩ |
+
+### Autres symptômes
+
 | Symptôme | Cause la plus probable |
 |---|---|
-| Aucun capteur dans `/sys/bus/w1/devices/` | 1-Wire non activé, ou résistance de tirage de 4,7 kΩ absente |
 | `valeur de reset 85 °C` dans le journal | alimentation insuffisante ou câble trop long ; alimentez en 3,3 V plutôt qu'en parasite |
 | `CRC invalide` occasionnel | normal sur un câble long ; tempi réessaie, seuls les échecs répétés sont journalisés |
 | Lectures qui s'arrêtent après quelques heures | fils trop longs ou trop nombreux : réduisez la résistance de tirage à 2,2 kΩ |
+| `tempi: command not found` | installation antérieure à l'ajout du lien `/usr/local/bin/tempi` : relancez `scripts/install.sh` |
 | Interface inaccessible depuis un autre poste | `TEMPI_HOST` vaut `127.0.0.1` (voir section 7) |
 | Courbe interrompue | collecte arrêtée sur cette période ; tempi ne relie pas artificiellement les deux bords |
 
@@ -260,6 +291,7 @@ Organisation du code :
 | `tempi/storage.py` | schéma SQLite, écriture, requêtes, agrégation, purge |
 | `tempi/collector.py` | boucle de collecte, bande morte, rétention |
 | `tempi/web.py` | serveur HTTP, API JSON, export CSV |
+| `tempi/diagnostics.py` | analyse de l'état du bus, sans accès système — donc testable partout |
 | `tempi/cli.py` | ligne de commande |
 | `tempi/static/index.html` | interface web (HTML, CSS et JavaScript sans dépendance) |
 
