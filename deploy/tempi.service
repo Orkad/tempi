@@ -1,6 +1,6 @@
 [Unit]
 Description=tempi — enregistrement de la température DS18B20
-Documentation=https://github.com/orkad/tempi
+Documentation=https://github.com/Orkad/tempi
 After=network-online.target
 Wants=network-online.target
 

@@ -85,10 +85,21 @@ fi
 
 # --- Service ----------------------------------------------------------------
 
+if systemctl is-active --quiet "$SERVICE"; then was_active=yes; else was_active=no; fi
+
 info "Installation de $SERVICE."
 install -m 0644 "$REPO_DIR/deploy/$SERVICE" "/etc/systemd/system/$SERVICE"
 systemctl daemon-reload
-systemctl enable --now "$SERVICE"
+systemctl enable --quiet "$SERVICE"
+
+if [[ $was_active == yes ]]; then
+    # Redémarrage explicite : « enable --now » ne fait rien sur une unité déjà
+    # active, si bien qu'une mise à jour laisserait tourner l'ancien code.
+    info "Redémarrage du service pour charger la nouvelle version."
+    systemctl restart "$SERVICE"
+else
+    systemctl start "$SERVICE"
+fi
 
 sleep 2
 if systemctl is-active --quiet "$SERVICE"; then
