@@ -60,6 +60,7 @@
   .card .age { font-size: .75rem; color: var(--muted); }
   .card.stale { opacity: .55; }
   .controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+  #ranges { display: flex; flex-wrap: wrap; gap: .4rem; }
   button {
     font: inherit;
     color: var(--text);
@@ -81,7 +82,11 @@
   .axis { fill: var(--muted); font-size: 11px; }
   .gridline { stroke: var(--grid); stroke-width: 1; }
   .empty { color: var(--muted); text-align: center; padding: 3rem 1rem; }
-  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  /* La table à six colonnes est plus large qu'un écran de téléphone. Elle défile
+     dans son propre conteneur : sans cela, elle élargit tout le document et
+     rogne l'en-tête, les cartes et le graphique. */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; min-width: 24rem; }
   th, td { text-align: right; padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
   th:first-child, td:first-child { text-align: left; }
   td { font-variant-numeric: tabular-nums; }
@@ -94,6 +99,25 @@
   .tip .t { color: var(--muted); margin-bottom: .25rem; }
   .tip .row { display: flex; align-items: center; gap: .4rem; }
   .tip .swatch { width: .6rem; height: .6rem; border-radius: 2px; }
+
+  @media (max-width: 480px) {
+    body { padding: .75rem; }
+    h1 { font-size: 1.1rem; }
+    /* Deux cartes par ligne plutôt qu'une largeur fixe qui déborde. */
+    .card { min-width: 0; flex: 1 1 8.5rem; padding: .6rem .75rem; }
+    .card .value { font-size: 1.35rem; }
+    .panel { padding: .75rem; }
+    #chart { height: 300px; }
+    /* Sans l'espaceur, « Rafraîchir » et l'export se replient à gauche
+       au lieu d'être poussés hors de l'écran. */
+    .controls .spacer { display: none; }
+    th, td { padding: .35rem .4rem; }
+    /* Le nombre de mesures est la colonne la moins décisive : la masquer permet
+       aux cinq autres de tenir sans défilement. La donnée reste dans l'API et
+       dans l'export CSV. */
+    th:nth-child(6), td:nth-child(6) { display: none; }
+    table { min-width: 0; font-size: .82rem; }
+  }
 </style>
 </head>
 <body>
@@ -116,12 +140,14 @@
 </div>
 
 <div class="panel">
-  <table>
-    <thead>
-      <tr><th>Capteur</th><th>Min</th><th>Moy.</th><th>Max</th><th>Amplitude</th><th>Mesures</th></tr>
-    </thead>
-    <tbody id="summary"></tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Capteur</th><th>Min</th><th>Moy.</th><th>Max</th><th>Amplitude</th><th>Mesures</th></tr>
+      </thead>
+      <tbody id="summary"></tbody>
+    </table>
+  </div>
 </div>
 
 <div class="tip" id="tip"></div>
