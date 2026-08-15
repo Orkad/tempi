@@ -22,6 +22,10 @@ Le DS18B20 se branche sur le bus 1-Wire, par défaut sur le **GPIO 4**
 
 ![Câblage du DS18B20 sur le Raspberry Pi](docs/cablage.svg)
 
+Le même montage sur une mini-platine d'essai, trou par trou :
+
+![Montage sur breadboard](docs/breadboard.svg)
+
 **Une résistance de tirage de 4,7 kΩ entre DQ et 3,3 V est indispensable** :
 sans elle, le bus reste muet ou renvoie des valeurs erratiques. Elle est déjà
 intégrée aux modules DS18B20 vendus sur petite carte, mais pas aux composants
