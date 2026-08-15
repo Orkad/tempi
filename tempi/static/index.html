@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tempi — températures</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #dfe3e8;
+    --text: #1b1f24;
+    --muted: #616a75;
+    --accent: #2f6fd0;
+    --grid: #e7eaee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --panel: #1c2027;
+      --border: #2c323b;
+      --text: #e8eaed;
+      --muted: #9aa4b0;
+      --accent: #6ea8fe;
+      --grid: #262b33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 1.25rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .75rem; margin-bottom: 1rem; }
+  h1 { font-size: 1.25rem; margin: 0; }
+  .status { color: var(--muted); font-size: .85rem; }
+  .status.error { color: #d0342c; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .cards { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--dot, var(--accent));
+    border-radius: 10px;
+    padding: .7rem .95rem;
+    min-width: 11rem;
+  }
+  .card .name { font-size: .8rem; color: var(--muted); cursor: pointer; }
+  .card .name:hover { text-decoration: underline; }
+  .card .value { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+  .card .age { font-size: .75rem; color: var(--muted); }
+  .card.stale { opacity: .55; }
+  .controls { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+  button {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .3rem .7rem;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  #ranges button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .spacer { flex: 1; }
+  a { color: var(--accent); }
+  .legend { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .5rem; font-size: .85rem; }
+  .legend button { display: flex; align-items: center; gap: .4rem; border: none; background: none; color: var(--text); padding: .15rem .3rem; }
+  .legend .swatch { width: .75rem; height: .75rem; border-radius: 3px; }
+  .legend button[aria-pressed="false"] { opacity: .4; }
+  #chart { width: 100%; height: 380px; display: block; touch-action: none; }
+  .axis { fill: var(--muted); font-size: 11px; }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .empty { color: var(--muted); text-align: center; padding: 3rem 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: right; padding: .4rem .5rem; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  td { font-variant-numeric: tabular-nums; }
+  .tip {
+    position: fixed; pointer-events: none; z-index: 10;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: .5rem .65rem; font-size: .82rem; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    opacity: 0; transition: opacity .1s;
+  }
+  .tip .t { color: var(--muted); margin-bottom: .25rem; }
+  .tip .row { display: flex; align-items: center; gap: .4rem; }
+  .tip .swatch { width: .6rem; height: .6rem; border-radius: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>tempi</h1>
+  <span class="status" id="status">chargement…</span>
+</header>
+
+<div class="cards" id="cards"></div>
+
+<div class="panel">
+  <div class="controls">
+    <div id="ranges"></div>
+    <div class="spacer"></div>
+    <button id="refresh" title="Rafraîchir maintenant">Rafraîchir</button>
+    <a id="csv" href="#" download>Export CSV</a>
+  </div>
+  <svg id="chart" role="img" aria-label="Évolution de la température"></svg>
+  <div class="legend" id="legend"></div>
+</div>
+
+<div class="panel">
+  <table>
+    <thead>
+      <tr><th>Capteur</th><th>Min</th><th>Moy.</th><th>Max</th><th>Amplitude</th><th>Mesures</th></tr>
+    </thead>
+    <tbody id="summary"></tbody>
+  </table>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+"use strict";
+
+const PALETTE = ["#2f6fd0", "#d1642c", "#2e9e6b", "#a855c7", "#c9a227", "#0f9bb0", "#d0417e", "#6b7280"];
+const RANGES = [
+  { key: "1h",  label: "1 h"    },
+  { key: "6h",  label: "6 h"    },
+  { key: "24h", label: "24 h",  default: true },
+  { key: "7d",  label: "7 j"    },
+  { key: "30d", label: "30 j"   },
+  { key: "all", label: "Tout"   },
+];
+
+/** L'URL prime sur la dernière plage consultée, pour que les liens soient partageables. */
+function initialRange() {
+  const requested = new URLSearchParams(location.search).get("range");
+  if (requested && RANGES.some((r) => r.key === requested)) return requested;
+  return localStorage.getItem("tempi.range") || "24h";
+}
+
+const state = {
+  range: initialRange(),
+  hidden: new Set(JSON.parse(localStorage.getItem("tempi.hidden") || "[]")),
+  series: [],
+  window: { from: 0, to: 0 },
+  bucket: 0,
+  colors: new Map(),
+  hover: null,
+};
+
+const $ = (id) => document.getElementById(id);
+const svgNS = "http://www.w3.org/2000/svg";
+
+function colorFor(address) {
+  if (!state.colors.has(address)) {
+    state.colors.set(address, PALETTE[state.colors.size % PALETTE.length]);
+  }
+  return state.colors.get(address);
+}
+
+function nameFor(s) { return s.label || s.address; }
+
+function fmtTemp(v) { return v == null ? "—" : v.toFixed(1) + " °C"; }
+
+function fmtAge(seconds) {
+  if (seconds == null) return "jamais";
+  if (seconds < 60) return "il y a " + Math.round(seconds) + " s";
+  if (seconds < 3600) return "il y a " + Math.round(seconds / 60) + " min";
+  if (seconds < 86400) return "il y a " + Math.round(seconds / 3600) + " h";
+  return "il y a " + Math.round(seconds / 86400) + " j";
+}
+
+function fmtTick(ts, span) {
+  const d = new Date(ts * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  if (span <= 2 * 86400) return pad(d.getHours()) + ":" + pad(d.getMinutes());
+  return pad(d.getDate()) + "/" + pad(d.getMonth() + 1);
+}
+
+function fmtFull(ts) {
+  return new Date(ts * 1000).toLocaleString("fr-FR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
+
+/** Bornes « rondes » pour l'axe des ordonnées. */
+function niceScale(lo, hi, count) {
+  if (!isFinite(lo) || !isFinite(hi)) return { lo: 0, hi: 1, step: 1 };
+  if (hi - lo < 0.5) { const mid = (lo + hi) / 2; lo = mid - 0.5; hi = mid + 0.5; }
+  const rough = (hi - lo) / Math.max(1, count);
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= rough) || mag * 10;
+  return { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step };
+}
+
+function timeTicks(from, to, count) {
+  const steps = [60, 300, 900, 1800, 3600, 7200, 21600, 43200, 86400, 172800, 604800, 2592000];
+  const span = to - from;
+  const step = steps.find((s) => span / s <= count) || steps[steps.length - 1];
+  const ticks = [];
+  // Aligner sur le fuseau local pour que « minuit » tombe bien à minuit.
+  const offset = new Date().getTimezoneOffset() * 60;
+  for (let t = Math.ceil((from - offset) / step) * step + offset; t <= to; t += step) ticks.push(t);
+  return ticks;
+}
+
+// -- rendu ------------------------------------------------------------------
+
+function visibleSeries() {
+  return state.series.filter((s) => !state.hidden.has(s.address) && s.points.length);
+}
+
+function drawChart() {
+  const svg = $("chart");
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const width = svg.clientWidth || 800;
+  const height = svg.clientHeight || 380;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  const shown = visibleSeries();
+  if (!shown.length) {
+    const text = document.createElementNS(svgNS, "text");
+    text.setAttribute("x", width / 2);
+    text.setAttribute("y", height / 2);
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("class", "axis");
+    text.textContent = "Aucune mesure sur cette période";
+    svg.appendChild(text);
+    return;
+  }
+
+  const margin = { top: 12, right: 14, bottom: 26, left: 46 };
+  const plotW = Math.max(10, width - margin.left - margin.right);
+  const plotH = Math.max(10, height - margin.top - margin.bottom);
+
+  let lo = Infinity, hi = -Infinity;
+  for (const s of shown) {
+    for (const p of s.points) {
+      if (p.min < lo) lo = p.min;
+      if (p.max > hi) hi = p.max;
+    }
+  }
+  const scale = niceScale(lo, hi, 5);
+  const t0 = state.window.from, t1 = Math.max(state.window.to, t0 + 1);
+
+  const x = (ts) => margin.left + ((ts - t0) / (t1 - t0)) * plotW;
+  const y = (c) => margin.top + plotH - ((c - scale.lo) / (scale.hi - scale.lo)) * plotH;
+
+  const add = (tag, attrs, cls) => {
+    const el = document.createElementNS(svgNS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (cls) el.setAttribute("class", cls);
+    svg.appendChild(el);
+    return el;
+  };
+
+  // Grille + axe des ordonnées
+  for (let c = scale.lo; c <= scale.hi + 1e-9; c += scale.step) {
+    const yy = y(c);
+    add("line", { x1: margin.left, y1: yy, x2: margin.left + plotW, y2: yy }, "gridline");
+    const label = add("text", { x: margin.left - 8, y: yy + 4, "text-anchor": "end" }, "axis");
+    label.textContent = (Math.round(c * 10) / 10).toFixed(1);
+  }
+
+  // Axe des abscisses
+  for (const ts of timeTicks(t0, t1, Math.max(2, Math.floor(plotW / 90)))) {
+    const xx = x(ts);
+    add("line", { x1: xx, y1: margin.top, x2: xx, y2: margin.top + plotH }, "gridline");
+    const label = add("text", { x: xx, y: height - 8, "text-anchor": "middle" }, "axis");
+    label.textContent = fmtTick(ts, t1 - t0);
+  }
+
+  // Une coupure de plus de trois intervalles signale un arrêt de la collecte :
+  // on interrompt le tracé plutôt que de relier artificiellement les deux bords.
+  const gap = Math.max(state.bucket * 3, 1) || Infinity;
+
+  for (const s of shown) {
+    const color = colorFor(s.address);
+
+    if (state.bucket > 0 && s.points.some((p) => p.samples > 1)) {
+      let top = "", bottom = "";
+      let open = false;
+      for (let i = 0; i < s.points.length; i++) {
+        const p = s.points[i];
+        const broken = i > 0 && p.ts - s.points[i - 1].ts > gap;
+        if (broken && open) { top += " " + bottom + " Z"; bottom = ""; open = false; }
+        if (!open) { top += ` M ${x(p.ts)} ${y(p.max)}`; bottom = `L ${x(p.ts)} ${y(p.min)}`; open = true; }
+        else { top += ` L ${x(p.ts)} ${y(p.max)}`; bottom = `L ${x(p.ts)} ${y(p.min)} ` + bottom; }
+      }
+      if (open) top += " " + bottom + " Z";
+      add("path", { d: top, fill: color, "fill-opacity": .16, stroke: "none" });
+    }
+
+    let d = "";
+    for (let i = 0; i < s.points.length; i++) {
+      const p = s.points[i];
+      const broken = i > 0 && p.ts - s.points[i - 1].ts > gap;
+      d += (i === 0 || broken ? " M " : " L ") + x(p.ts) + " " + y(p.celsius);
+    }
+    add("path", {
+      d, fill: "none", stroke: color, "stroke-width": 1.8,
+      "stroke-linejoin": "round", "stroke-linecap": "round",
+    });
+  }
+
+  // Curseur de survol
+  if (state.hover != null) {
+    const xx = x(state.hover);
+    if (xx >= margin.left && xx <= margin.left + plotW) {
+      add("line", {
+        x1: xx, y1: margin.top, x2: xx, y2: margin.top + plotH,
+        stroke: "currentColor", "stroke-opacity": .35, "stroke-dasharray": "3 3",
+      });
+      for (const s of shown) {
+        const p = nearestPoint(s, state.hover);
+        if (p) add("circle", { cx: x(p.ts), cy: y(p.celsius), r: 3.5, fill: colorFor(s.address) });
+      }
+    }
+  }
+
+  svg._scales = { x, margin, plotW, t0, t1 };
+}
+
+function nearestPoint(series, ts) {
+  if (!series.points.length) return null;
+  let best = null, bestDist = Infinity;
+  for (const p of series.points) {
+    const dist = Math.abs(p.ts - ts);
+    if (dist < bestDist) { bestDist = dist; best = p; }
+  }
+  const tolerance = Math.max(state.bucket * 2, (state.window.to - state.window.from) / 60);
+  return bestDist <= tolerance ? best : null;
+}
+
+function renderCards(latest, now) {
+  const cards = $("cards");
+  cards.innerHTML = "";
+  for (const s of latest) {
+    const div = document.createElement("div");
+    div.className = "card";
+    const age = s.ts == null ? null : now - s.ts;
+    if (age == null || age > 300) div.classList.add("stale");
+    div.style.setProperty("--dot", colorFor(s.address));
+    div.innerHTML =
+      `<div class="name" title="${s.address} — cliquer pour renommer">${escapeHtml(nameFor(s))}</div>` +
+      `<div class="value">${fmtTemp(s.celsius)}</div>` +
+      `<div class="age">${fmtAge(age)}</div>`;
+    div.querySelector(".name").addEventListener("click", () => renameSensor(s));
+    cards.appendChild(div);
+  }
+}
+
+function renderLegend() {
+  const legend = $("legend");
+  legend.innerHTML = "";
+  for (const s of state.series) {
+    const on = !state.hidden.has(s.address);
+    const button = document.createElement("button");
+    button.setAttribute("aria-pressed", String(on));
+    button.innerHTML = `<span class="swatch" style="background:${colorFor(s.address)}"></span>` +
+                       `<span>${escapeHtml(nameFor(s))}</span>`;
+    button.addEventListener("click", () => {
+      if (on) state.hidden.add(s.address); else state.hidden.delete(s.address);
+      localStorage.setItem("tempi.hidden", JSON.stringify([...state.hidden]));
+      renderLegend();
+      drawChart();
+      loadSummary();
+    });
+    legend.appendChild(button);
+  }
+}
+
+function renderSummary(summary) {
+  const body = $("summary");
+  body.innerHTML = "";
+  const entries = Object.entries(summary).filter(([address]) => !state.hidden.has(address));
+  if (!entries.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">Aucune donnée sur cette période</td></tr>';
+    return;
+  }
+  const labels = new Map(state.series.map((s) => [s.address, nameFor(s)]));
+  for (const [address, stats] of entries) {
+    const row = document.createElement("tr");
+    row.innerHTML =
+      `<td>${escapeHtml(labels.get(address) || address)}</td>` +
+      `<td>${stats.min.toFixed(2)}</td><td>${stats.avg.toFixed(2)}</td><td>${stats.max.toFixed(2)}</td>` +
+      `<td>${(stats.max - stats.min).toFixed(2)}</td><td>${stats.samples}</td>`;
+    body.appendChild(row);
+  }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// -- données ----------------------------------------------------------------
+
+async function fetchJson(url) {
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.error || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadSeries() {
+  const data = await fetchJson(`api/series?range=${encodeURIComponent(state.range)}`);
+  state.series = data.series;
+  state.window = { from: data.from, to: data.to };
+  state.bucket = data.bucket;
+  for (const s of state.series) colorFor(s.address);
+  $("csv").href = `api/export.csv?range=${encodeURIComponent(state.range)}`;
+  renderLegend();
+  drawChart();
+}
+
+async function loadSummary() {
+  const data = await fetchJson(`api/summary?range=${encodeURIComponent(state.range)}`);
+  renderSummary(data.summary);
+}
+
+async function loadLatest() {
+  const data = await fetchJson("api/latest");
+  renderCards(data.sensors, data.now);
+}
+
+async function refresh() {
+  const status = $("status");
+  try {
+    // Le tableau récapitulatif reprend les noms des séries : il doit donc être
+    // rendu après elles, sans quoi il retomberait sur les adresses brutes.
+    await Promise.all([loadLatest(), loadSeries().then(loadSummary)]);
+    status.classList.remove("error");
+    const points = state.series.reduce((n, s) => n + s.points.length, 0);
+    const step = state.bucket ? `, moyennes sur ${humanBucket(state.bucket)}` : "";
+    status.textContent = `${points} point(s)${step} — mis à jour à ${new Date().toLocaleTimeString("fr-FR")}`;
+  } catch (error) {
+    status.classList.add("error");
+    status.textContent = "erreur : " + error.message;
+  }
+}
+
+function humanBucket(seconds) {
+  if (seconds < 60) return seconds + " s";
+  if (seconds < 3600) return Math.round(seconds / 60) + " min";
+  if (seconds < 86400) return Math.round(seconds / 3600) + " h";
+  return Math.round(seconds / 86400) + " j";
+}
+
+async function renameSensor(sensor) {
+  const label = prompt(`Nom du capteur ${sensor.address} :`, sensor.label || "");
+  if (label === null) return;
+  try {
+    await fetch(`api/sensors/${encodeURIComponent(sensor.address)}/label`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label }),
+    });
+    await refresh();
+  } catch (error) {
+    alert("Renommage impossible : " + error.message);
+  }
+}
+
+// -- interactions -----------------------------------------------------------
+
+function buildRanges() {
+  const container = $("ranges");
+  for (const range of RANGES) {
+    const button = document.createElement("button");
+    button.textContent = range.label;
+    button.setAttribute("aria-pressed", String(range.key === state.range));
+    button.addEventListener("click", () => {
+      state.range = range.key;
+      localStorage.setItem("tempi.range", range.key);
+      history.replaceState(null, "", "?range=" + range.key);
+      for (const other of container.children) {
+        other.setAttribute("aria-pressed", String(other === button));
+      }
+      refresh();
+    });
+    container.appendChild(button);
+  }
+}
+
+function setupHover() {
+  const svg = $("chart");
+  const tip = $("tip");
+
+  const move = (event) => {
+    const scales = svg._scales;
+    if (!scales) return;
+    const rect = svg.getBoundingClientRect();
+    const px = event.clientX - rect.left;
+    const ratio = (px - scales.margin.left) / scales.plotW;
+    if (ratio < 0 || ratio > 1) return hide();
+
+    state.hover = scales.t0 + ratio * (scales.t1 - scales.t0);
+    drawChart();
+
+    const rows = [];
+    for (const s of visibleSeries()) {
+      const point = nearestPoint(s, state.hover);
+      if (!point) continue;
+      const extra = point.samples > 1 ? ` <span style="opacity:.6">(${point.min.toFixed(1)} – ${point.max.toFixed(1)})</span>` : "";
+      rows.push(`<div class="row"><span class="swatch" style="background:${colorFor(s.address)}"></span>` +
+                `<span>${escapeHtml(nameFor(s))}</span><b>${point.celsius.toFixed(2)} °C</b>${extra}</div>`);
+    }
+    if (!rows.length) return hide();
+
+    tip.innerHTML = `<div class="t">${fmtFull(Math.round(state.hover))}</div>` + rows.join("");
+    tip.style.opacity = "1";
+    const width = tip.offsetWidth;
+    tip.style.left = Math.min(event.clientX + 14, window.innerWidth - width - 8) + "px";
+    tip.style.top = Math.min(event.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+  };
+
+  const hide = () => {
+    if (state.hover !== null) { state.hover = null; drawChart(); }
+    tip.style.opacity = "0";
+  };
+
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerleave", hide);
+}
+
+buildRanges();
+setupHover();
+$("refresh").addEventListener("click", refresh);
+new ResizeObserver(() => drawChart()).observe($("chart"));
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

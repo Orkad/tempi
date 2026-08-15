@@ -1,0 +1,41 @@
+[Unit]
+Description=tempi — enregistrement de la température DS18B20
+Documentation=https://github.com/orkad/tempi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=tempi
+Group=tempi
+
+# systemd crée /var/lib/tempi et l'attribue au service.
+StateDirectory=tempi
+Environment=TEMPI_DB=/var/lib/tempi/tempi.db
+
+# Le tiret initial rend le fichier facultatif : le service démarre même sans lui.
+EnvironmentFile=-/etc/tempi/tempi.env
+
+ExecStart=/opt/tempi/venv/bin/tempi run
+Restart=on-failure
+RestartSec=5s
+
+# Durcissement. Le bus 1-Wire est lu dans /sys, accessible en lecture seule :
+# aucune de ces restrictions ne gêne la collecte.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
