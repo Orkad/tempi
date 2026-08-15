@@ -20,13 +20,9 @@ ou plusieurs capteurs **DS18B20** sur un **Raspberry Pi**.
 Le DS18B20 se branche sur le bus 1-Wire, par défaut sur le **GPIO 4**
 (broche physique 7).
 
-| DS18B20 | Raspberry Pi                  |
-|---------|-------------------------------|
-| GND     | broche 6 (GND)                |
-| VDD     | broche 1 (3,3 V)              |
-| DATA    | broche 7 (GPIO 4)             |
+![Câblage du DS18B20 sur le Raspberry Pi](docs/cablage.svg)
 
-**Une résistance de tirage de 4,7 kΩ entre DATA et 3,3 V est indispensable** :
+**Une résistance de tirage de 4,7 kΩ entre DQ et 3,3 V est indispensable** :
 sans elle, le bus reste muet ou renvoie des valeurs erratiques. Elle est déjà
 intégrée aux modules DS18B20 vendus sur petite carte, mais pas aux composants
 nus ni aux sondes étanches.
