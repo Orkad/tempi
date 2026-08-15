@@ -306,12 +306,9 @@ function drawChart() {
     label.textContent = fmtTick(ts, t1 - t0);
   }
 
-  // Une coupure de plus de trois intervalles signale un arrêt de la collecte :
-  // on interrompt le tracé plutôt que de relier artificiellement les deux bords.
-  const gap = Math.max(state.bucket * 3, 1) || Infinity;
-
   for (const s of shown) {
     const color = colorFor(s.address);
+    const gap = gapFor(s.points);
 
     if (state.bucket > 0 && s.points.some((p) => p.samples > 1)) {
       let top = "", bottom = "";
@@ -355,6 +352,24 @@ function drawChart() {
   }
 
   svg._scales = { x, margin, plotW, t0, t1 };
+}
+
+/**
+ * Écart au-delà duquel on interrompt le tracé plutôt que de relier deux points :
+ * la collecte s'est arrêtée sur cet intervalle.
+ *
+ * Le seuil se déduit de l'espacement réel des points, pas de la tranche
+ * d'agrégation. Sur une plage courte, la tranche vaut quelques secondes alors
+ * que les relevés sont espacés d'une minute : un seuil calculé sur la tranche
+ * couperait chaque segment et le graphique resterait vide.
+ */
+function gapFor(points) {
+  if (points.length < 3) return Infinity;
+  const deltas = [];
+  for (let i = 1; i < points.length; i++) deltas.push(points[i].ts - points[i - 1].ts);
+  deltas.sort((a, b) => a - b);
+  const median = deltas[Math.floor(deltas.length / 2)];
+  return Math.max(median * 3, state.bucket * 3, 1);
 }
 
 function nearestPoint(series, ts) {
