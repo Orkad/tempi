@@ -9,6 +9,7 @@
 set -euo pipefail
 
 PREFIX=/opt/tempi
+BIN_LINK=/usr/local/bin/tempi
 CONFIG_DIR=/etc/tempi
 SERVICE=tempi.service
 USER_NAME=tempi
@@ -72,6 +73,16 @@ fi
 
 info "Installation de tempi depuis $REPO_DIR."
 "$PREFIX/venv/bin/pip" install --quiet --upgrade "$REPO_DIR"
+
+# L'environnement virtuel n'est pas dans le PATH : sans ce lien, la commande
+# documentée « tempi sensors » répond « command not found ».
+if [[ -e $BIN_LINK && ! -L $BIN_LINK ]]; then
+    warn "$BIN_LINK existe déjà et n'est pas un lien symbolique : commande non installée."
+    warn "Utilisez $PREFIX/venv/bin/tempi, ou supprimez ce fichier et relancez."
+else
+    ln -sfn "$PREFIX/venv/bin/tempi" "$BIN_LINK"
+    info "Commande disponible : tempi ($BIN_LINK)"
+fi
 
 # --- Configuration ----------------------------------------------------------
 
