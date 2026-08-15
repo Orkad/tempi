@@ -11,6 +11,7 @@ from tempi.diagnostics import (
     classify_devices,
     diagnose_bus,
     diagnose_gpio,
+    holds_low,
     parse_modules,
     parse_overlay,
     parse_pinctrl,
@@ -141,10 +142,44 @@ class DiagnoseBusTests(unittest.TestCase):
         self.assertFalse(check.ok)
         self.assertIn("masse", check.remedy)
 
+    def test_low_level_under_internal_pullup_overrides_changing_roms(self):
+        # Cas relevé sur le montage réel : les ROM changeaient d'un balayage à
+        # l'autre, ce qui évoque une ligne flottante, mais la ligne restait basse
+        # malgré le tirage interne. Le niveau électrique prime.
+        first = classify_devices(["00-1f8000000000", "00-6f8000000000", "w1_bus_master1"])
+        second = classify_devices(["00-ef8000000000", "w1_bus_master1"])
+        check = diagnose_bus(first, second, gpio_level="lo", gpio_function="ip pu")
+        self.assertFalse(check.ok)
+        self.assertIn("masse", check.remedy)
+        self.assertIn("malgré le tirage interne", check.detail)
+
+    def test_changing_roms_without_pullup_evidence_stays_floating(self):
+        first = classify_devices(["00-1f8000000000", "w1_bus_master1"])
+        second = classify_devices(["00-ef8000000000", "w1_bus_master1"])
+        check = diagnose_bus(first, second, gpio_level="lo", gpio_function="ip pn")
+        self.assertIn("flottante", check.remedy)
+
     def test_phantoms_without_second_scan_stays_generic(self):
         check = diagnose_bus(classify_devices(["00-1f8000000000", "w1_bus_master1"]))
         self.assertFalse(check.ok)
         self.assertIn("tirage", check.remedy)
+
+
+class HoldsLowTests(unittest.TestCase):
+    def test_low_with_internal_pullup(self):
+        self.assertTrue(holds_low("lo", "ip pu"))
+        self.assertTrue(holds_low("lo", "input pull=UP"))
+
+    def test_low_without_pullup_proves_nothing(self):
+        self.assertFalse(holds_low("lo", "ip pn"))
+        self.assertFalse(holds_low("lo", None))
+
+    def test_high_is_never_held_low(self):
+        self.assertFalse(holds_low("hi", "ip pu"))
+
+    def test_pu_must_be_a_whole_field(self):
+        # « pull=none » ne doit pas être pris pour un tirage actif.
+        self.assertFalse(holds_low("lo", "input pull=NONE"))
 
 
 class DiagnoseGpioTests(unittest.TestCase):

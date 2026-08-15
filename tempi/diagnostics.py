@@ -150,10 +150,26 @@ def classify_devices(names: Sequence[str]) -> BusInventory:
     return inventory
 
 
+def holds_low(gpio_level: str | None, gpio_function: str | None) -> bool:
+    """Vrai si la ligne reste basse alors que le tirage interne est actif.
+
+    C'est la preuve la plus solide dont on dispose : le tirage interne du SoC
+    vaut une cinquantaine de kilo-ohms, assez pour ramener au niveau haut une
+    ligne simplement flottante. S'il n'y parvient pas, un chemin conducteur tire
+    vers la masse. Cette observation prime sur la lecture des ROM parasites, qui
+    n'est qu'un symptôme indirect.
+    """
+    if gpio_level != "lo" or not gpio_function:
+        return False
+    function = gpio_function.lower()
+    return "pu" in function.split() or "pull=up" in function
+
+
 def diagnose_bus(
     inventory: BusInventory,
     second_scan: BusInventory | None = None,
     gpio_level: str | None = None,
+    gpio_function: str | None = None,
 ) -> Check:
     """Nomme l'état du bus à partir de l'inventaire et, si possible, d'un second
     balayage et du niveau électrique de la ligne.
@@ -193,25 +209,44 @@ def diagnose_bus(
         )
 
     # Des fantômes, et aucun capteur : la ligne est en défaut. Reste à dire lequel.
+    roms = ", ".join(inventory.phantoms)
     stable = second_scan is not None and set(second_scan.phantoms) == set(inventory.phantoms)
-    all_stuck = all(rom == STUCK_LOW_ROM for rom in inventory.phantoms)
+    changing = second_scan is not None and not stable
+    all_stuck = bool(inventory.phantoms) and all(
+        rom == STUCK_LOW_ROM for rom in inventory.phantoms
+    )
+    grounded = holds_low(gpio_level, gpio_function)
 
-    if all_stuck or (stable and gpio_level == "lo"):
+    # Le niveau électrique prime : des ROM changeantes évoquent une ligne
+    # flottante, mais si le tirage interne ne parvient pas à la remonter, c'est
+    # qu'elle est bel et bien reliée à la masse.
+    if grounded or all_stuck or (stable and gpio_level == "lo"):
+        if grounded and changing:
+            detail = (
+                f"ROM parasite(s) changeantes ({roms}), mais la ligne reste basse "
+                "malgré le tirage interne"
+            )
+        elif all_stuck or stable:
+            detail = f"ROM parasite(s) constante(s) : {roms}"
+        else:
+            detail = f"ROM parasite(s) : {roms}"
         return Check(
             "État du bus",
             False,
-            f"ROM parasite(s) constante(s) : {', '.join(inventory.phantoms)}",
-            "Ligne de données tenue à la masse. Le fil de données et la masse "
+            detail,
+            "Ligne de données reliée à la masse. Le fil de données et la masse "
             "partagent une rangée, la résistance de tirage part sur la masse au lieu "
-            "du 3,3 V, ou le capteur est monté à l'envers.",
+            "du 3,3 V, ou le capteur est monté à l'envers. Débranchez le fil de "
+            "données côté platine : si la ligne reste basse, le défaut est côté "
+            "Raspberry Pi.",
             critical=True,
         )
 
-    if second_scan is not None and not stable:
+    if changing:
         return Check(
             "État du bus",
             False,
-            f"ROM parasite(s) changeantes : {', '.join(inventory.phantoms)}",
+            f"ROM parasite(s) changeantes : {roms}",
             "Ligne de données flottante : elle capte du bruit. La résistance de "
             "4,7 kΩ ne relie pas la donnée au 3,3 V — pattes dans la mauvaise rangée, "
             "ou valeur trop élevée (anneaux jaune, violet, rouge).",
@@ -221,7 +256,7 @@ def diagnose_bus(
     return Check(
         "État du bus",
         False,
-        f"ROM parasite(s) : {', '.join(inventory.phantoms)}",
+        f"ROM parasite(s) : {roms}",
         "Aucun capteur ne répond, le bus lit du bruit. Vérifiez la résistance de "
         "tirage entre la donnée et le 3,3 V, puis l'orientation du capteur.",
         critical=True,

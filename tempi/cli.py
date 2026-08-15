@@ -589,7 +589,7 @@ def cmd_doctor(args: argparse.Namespace, config: Config) -> int:
             )
 
     level, function = _read_gpio(gpio)
-    checks.append(diagnose_bus(inventory, second, level))
+    checks.append(diagnose_bus(inventory, second, level, function))
     checks.append(diagnose_gpio(level, function))
     checks.extend(_check_sensor_reads(bus, inventory.sensors))
     checks.append(_check_storage(config))
