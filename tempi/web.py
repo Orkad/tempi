@@ -5,6 +5,8 @@ sur Raspberry Pi ne demande aucune dépendance externe.
 
 Le serveur n'a pas d'authentification : il écoute par défaut sur 127.0.0.1.
 Pour l'exposer sur le réseau local, voir la section correspondante du README.
+Le chiffrement TLS est facultatif et s'active en fournissant un certificat et sa
+clé (voir ``tempi.tls``).
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ import io
 import json
 import logging
 import re
+import ssl
+import sys
 import time
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -24,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 from . import __version__
 from .config import Config
 from .storage import Storage, choose_bucket
+from .tls import load_context
 
 log = logging.getLogger(__name__)
 
@@ -287,23 +292,73 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"address": address, "label": label})
 
 
+class TLSServer(ThreadingHTTPServer):
+    """Serveur HTTPS.
+
+    La négociation TLS est faite dans le fil d'exécution du client, et non dans
+    ``get_request`` : sinon une connexion ouverte sans rien envoyer — un
+    scanner, un réseau qui coupe — bloquerait la boucle d'acceptation, et donc
+    tout le serveur.
+    """
+
+    ssl_context: ssl.SSLContext
+
+    def get_request(self):
+        sock, address = super().get_request()
+        wrapped = self.ssl_context.wrap_socket(
+            sock, server_side=True, do_handshake_on_connect=False
+        )
+        return wrapped, address
+
+    def finish_request(self, request, client_address) -> None:
+        request.do_handshake()
+        super().finish_request(request, client_address)
+
+    def handle_error(self, request, client_address) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, ssl.SSLError):
+            # Une poignée de main ratée est le quotidien d'un serveur TLS : un
+            # navigateur qui abandonne, une sonde du réseau. Seule mérite un
+            # avertissement la requête en clair, qui trahit une adresse http://
+            # tapée sur un port qui n'écoute qu'en https://.
+            if getattr(error, "reason", "") == "HTTP_REQUEST":
+                log.warning(
+                    "requête en clair reçue de %s : cette adresse s'ouvre en https://",
+                    client_address[0],
+                )
+            else:
+                log.debug("négociation TLS échouée avec %s : %s", client_address[0], error)
+            return
+        super().handle_error(request, client_address)
+
+
 def make_server(config: Config, storage: Storage, collector=None) -> ThreadingHTTPServer:
-    """Construit le serveur HTTP sans le démarrer."""
+    """Construit le serveur sans le démarrer, en TLS si un certificat est fourni."""
     handler = type(
         "BoundHandler",
         (Handler,),
         {"storage": storage, "config": config, "collector": collector},
     )
-    server = ThreadingHTTPServer((config.host, config.port), handler)
+    if config.tls:
+        context = load_context(config.tls_cert, config.tls_key)
+        server: ThreadingHTTPServer = TLSServer((config.host, config.port), handler)
+        server.ssl_context = context
+    else:
+        server = ThreadingHTTPServer((config.host, config.port), handler)
     server.daemon_threads = True
     return server
+
+
+def server_url(config: Config, server: ThreadingHTTPServer) -> str:
+    """Adresse à annoncer dans le journal."""
+    host = config.host if config.host not in ("0.0.0.0", "::") else "<toutes interfaces>"
+    return f"{config.scheme}://{host}:{server.server_address[1]}/"
 
 
 def serve(config: Config, storage: Storage, collector=None) -> None:
     """Démarre le serveur et bloque jusqu'à l'interruption."""
     server = make_server(config, storage, collector)
-    host = config.host if config.host not in ("0.0.0.0", "::") else "<toutes interfaces>"
-    log.info("interface web disponible sur http://%s:%d/", host, server.server_address[1])
+    log.info("interface web disponible sur %s", server_url(config, server))
     try:
         server.serve_forever()
     finally:

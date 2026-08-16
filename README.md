@@ -9,6 +9,7 @@ ou plusieurs capteurs **DS18B20** sur un **Raspberry Pi**.
   statistiques et export CSV ;
 - **aucune dépendance externe** : uniquement la bibliothèque standard de Python,
   donc pas de compilation ni de `pip install` d'un paquet lourd sur le Pi ;
+- **HTTPS** en option, sans reverse proxy : un certificat, une clé, c'est tout ;
 - service `systemd` prêt à l'emploi.
 
 ![Interface web de tempi](docs/capture.png)
@@ -119,6 +120,7 @@ tempi read                       # lecture immédiate, sans rien enregistrer
 tempi collect                    # boucle de collecte seule
 tempi serve                      # interface web seule
 tempi run                        # collecte + interface dans un seul processus
+tempi cert                       # certificat pour servir l'interface en HTTPS
 tempi label 28-000005e2fdc3 Salon
 tempi stats
 tempi export --range 30d -o mesures.csv
@@ -156,6 +158,8 @@ par les options de la ligne de commande. Pour le service, éditez
 | `TEMPI_RETENTION_DAYS` | `0` | purge automatique, `0` = illimité |
 | `TEMPI_HOST` | `127.0.0.1` | adresse d'écoute de l'interface web |
 | `TEMPI_PORT` | `8080` | port d'écoute |
+| `TEMPI_TLS_CERT` | — | certificat PEM ; active HTTPS (voir [Accès réseau](#7-accès-réseau)) |
+| `TEMPI_TLS_KEY` | — | clé privée du certificat |
 | `TEMPI_W1_DIR` | `/sys/bus/w1/devices` | répertoire des périphériques 1-Wire |
 | `TEMPI_READ_RETRIES` | `3` | tentatives par relevé avant abandon |
 | `TEMPI_ALLOW_RESET_VALUE` | `0` | accepter la valeur suspecte de 85 °C |
@@ -215,6 +219,110 @@ depuis le Raspberry Pi lui-même. Pour l'ouvrir au réseau local, mettez
 **tempi n'a aucune authentification.** N'exposez l'interface que sur un réseau
 de confiance. Pour un accès depuis l'extérieur, placez-la derrière un reverse
 proxy assurant TLS et authentification, ou passez par un VPN.
+
+### HTTPS
+
+tempi sait servir l'interface en TLS. Il lui suffit d'un certificat et de sa
+clé, quelle qu'en soit l'origine :
+
+```ini
+# /etc/tempi/tempi.env
+TEMPI_TLS_CERT=/etc/tempi/tls/tempi-cert.pem
+TEMPI_TLS_KEY=/etc/tempi/tls/tempi-key.pem
+```
+
+```bash
+sudo systemctl restart tempi
+sudo tempi doctor          # vérifie le certificat et son expiration
+```
+
+Le service bascule alors sur `https://`, sur le même port. Les options
+`--tls-cert` et `--tls-key` font la même chose pour un lancement manuel.
+
+Reste à obtenir le certificat, et c'est là que le choix se pose.
+
+> **Le point à comprendre avant de choisir.** Aucune autorité publique
+> — Let's Encrypt comprise — n'a le droit d'émettre un certificat pour un nom
+> interne (`raspberrypi.local`, `r4.local`) ni pour une adresse privée
+> (`192.168.x.x`) : c'est une règle du CA/Browser Forum, appliquée depuis 2015.
+> Un navigateur ne fera donc jamais confiance spontanément à un site désigné par
+> son nom local. Il faut renoncer à l'une des deux choses : soit installer une
+> autorité sur les appareils, soit désigner le Pi par un nom de domaine public.
+
+#### Voie A — autorité locale, on garde l'adresse `.local`
+
+```bash
+sudo tempi cert
+```
+
+La commande fabrique une petite autorité (`/etc/tempi/tls/ca.pem`) et, signé par
+elle, le certificat du serveur — couvrant le nom de la machine, son équivalent
+`.local` et ses adresses locales. `--host` et `--ip` permettent d'en ajouter.
+
+Il faut ensuite installer **l'autorité** (`ca.pem`, jamais la clé) sur chaque
+appareil : copiez-la par AirDrop, courriel ou clé USB, ouvrez-la, puis
+
+- **iOS** — Réglages > Profil téléchargé > Installer, puis Réglages > Général >
+  Informations > Réglages de confiance des certificats : activez
+  « tempi local CA ». Les deux étapes sont nécessaires ; la première seule ne
+  suffit pas, et iOS ne le signale pas.
+- **Android** — Paramètres > Sécurité > Chiffrement > Installer un certificat.
+- **macOS** — Trousseau d'accès > Système, double-clic, « Toujours approuver ».
+
+C'est à faire une seule fois par appareil : le certificat du serveur, lui, se
+renouvelle sans rien redemander à personne.
+
+```bash
+sudo tempi cert --force && sudo systemctl restart tempi
+```
+
+Le certificat vaut 397 jours — Safari refuse au-delà de 398. `tempi doctor`
+prévient un mois avant l'échéance.
+
+#### Voie B — Let's Encrypt, rien à installer sur les appareils
+
+Il faut un **nom de domaine public**, mais **le site peut rester purement
+local** : la validation `DNS-01` se fait par un enregistrement TXT, sans aucune
+connexion entrante, et rien ne vous oblige à faire pointer ce nom ailleurs que
+vers l'adresse privée du Pi. Un sous-domaine gratuit (DuckDNS) suffit ; un
+domaine à vous fonctionne pareil, avec l'API DNS de votre hébergeur.
+
+```bash
+# 1. le nom public désigne l'adresse privée du Pi (à mettre dans une tâche cron
+#    pour suivre les changements de bail DHCP)
+curl "https://www.duckdns.org/update?domains=r4&token=JETON&ip=192.168.1.42"
+
+# 2. certificat par validation DNS, sans ouvrir le moindre port
+curl https://get.acme.sh | sh -s email=vous@example.com
+export DuckDNS_Token="JETON"
+~/.acme.sh/acme.sh --issue --dns dns_duckdns -d r4.duckdns.org --server letsencrypt
+
+# 3. installation, avec renouvellement automatique tous les 60 jours
+sudo mkdir -p /etc/tempi/tls
+~/.acme.sh/acme.sh --install-cert -d r4.duckdns.org \
+    --key-file       /etc/tempi/tls/tempi-key.pem \
+    --fullchain-file /etc/tempi/tls/tempi-cert.pem \
+    --reloadcmd      "systemctl restart tempi"
+```
+
+L'interface répond alors sur `https://r4.duckdns.org:8080/`, avec un cadenas
+valide sur n'importe quel appareil, sans installation. L'adresse `.local`
+continue de fonctionner en clair pour les usages locaux.
+
+Deux points peuvent gêner : certaines box bloquent un nom public qui répond une
+adresse privée (protection « DNS rebinding », à désactiver pour ce nom), et le
+Relais privé iCloud d'un iPhone peut perturber la résolution — désactivez-le
+pour votre Wi-Fi.
+
+#### Droits de la clé privée
+
+Le service tourne sous l'utilisateur `tempi` et doit pouvoir lire la clé.
+`sudo tempi cert` s'en charge ; pour un certificat obtenu autrement :
+
+```bash
+sudo chgrp tempi /etc/tempi/tls/tempi-key.pem
+sudo chmod 640   /etc/tempi/tls/tempi-key.pem
+```
 
 ## 8. Exploitation
 

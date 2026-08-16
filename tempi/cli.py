@@ -40,7 +40,17 @@ from .sensor import (
     make_bus,
 )
 from .storage import Storage
-from .web import parse_duration, parse_timestamp, serve
+from .tls import (
+    LEAF_DAYS,
+    RENEW_WARNING_DAYS,
+    SERVICE_USER,
+    TlsError,
+    default_tls_dir,
+    describe,
+    generate,
+    load_context,
+)
+from .web import parse_duration, parse_timestamp, serve, server_url
 
 log = logging.getLogger("tempi")
 
@@ -67,6 +77,14 @@ def _fmt_size(num_bytes: int) -> str:
             return f"{value:.1f} {unit}" if unit != "o" else f"{int(value)} {unit}"
         value /= 1024
     return f"{value:.1f} Gio"
+
+
+def _add_tls_arguments(parser: argparse.ArgumentParser) -> None:
+    """Options communes aux commandes qui exposent l'interface web."""
+    parser.add_argument(
+        "--tls-cert", type=Path, help="certificat au format PEM ; active HTTPS"
+    )
+    parser.add_argument("--tls-key", type=Path, help="clé privée du certificat")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -105,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = subparsers.add_parser("serve", help="lance l'interface web et l'API")
     sub.add_argument("--host", help="adresse d'écoute (défaut : 127.0.0.1)")
     sub.add_argument("-p", "--port", type=int, help="port d'écoute (défaut : 8080)")
+    _add_tls_arguments(sub)
     sub.set_defaults(func=cmd_serve)
 
     sub = subparsers.add_parser("run", help="lance la collecte et l'interface web dans un seul processus")
@@ -114,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--retention-days", type=int, help="supprime les mesures plus anciennes que N jours")
     sub.add_argument("--host", help="adresse d'écoute (défaut : 127.0.0.1)")
     sub.add_argument("-p", "--port", type=int, help="port d'écoute (défaut : 8080)")
+    _add_tls_arguments(sub)
     sub.set_defaults(func=cmd_run)
 
     sub = subparsers.add_parser("export", help="exporte les mesures au format CSV")
@@ -138,6 +158,28 @@ def build_parser() -> argparse.ArgumentParser:
     sub.set_defaults(func=cmd_stats)
 
     sub = subparsers.add_parser(
+        "cert",
+        help="fabrique un certificat pour servir l'interface en HTTPS",
+        description=(
+            "Fabrique un certificat signé par une autorité locale, créée au premier "
+            "appel. Installer cette autorité sur les appareils rend le site de "
+            "confiance ; les renouvellements suivants ne demandent alors plus rien. "
+            "Pour un certificat reconnu sans rien installer, il faut un nom de "
+            "domaine public et Let's Encrypt : voir le README."
+        ),
+    )
+    sub.add_argument("--dir", type=Path, dest="directory",
+                     help="répertoire des certificats (défaut : /etc/tempi/tls)")
+    sub.add_argument("--host", action="append", dest="names",
+                     help="nom à couvrir, répétable (défaut : nom de la machine et .local)")
+    sub.add_argument("--ip", action="append", dest="addresses",
+                     help="adresse à couvrir, répétable (défaut : adresses locales détectées)")
+    sub.add_argument("--days", type=int, default=LEAF_DAYS,
+                     help=f"validité en jours (défaut : {LEAF_DAYS}, maximum accepté par Safari)")
+    sub.add_argument("--force", action="store_true", help="remplace un certificat existant")
+    sub.set_defaults(func=cmd_cert)
+
+    sub = subparsers.add_parser(
         "doctor", help="diagnostique le bus 1-Wire et nomme la panne"
     )
     sub.add_argument("--json", action="store_true", help="sortie exploitable par un script")
@@ -148,7 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _config_from_args(args: argparse.Namespace) -> Config:
     config = Config.from_env()
-    for attr in ("interval", "min_delta", "max_interval", "retention_days", "host", "port", "w1_dir"):
+    for attr in ("interval", "min_delta", "max_interval", "retention_days", "host", "port",
+                 "w1_dir", "tls_cert", "tls_key"):
         value = getattr(args, attr, None)
         if value is not None:
             setattr(config, attr, value)
@@ -257,8 +300,7 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
         from .web import make_server
 
         server = make_server(config, storage, collector)
-        host = config.host if config.host not in ("0.0.0.0", "::") else "<toutes interfaces>"
-        log.info("interface web disponible sur http://%s:%d/", host, server.server_address[1])
+        log.info("interface web disponible sur %s", server_url(config, server))
 
         def shutdown():
             collector.stop()
@@ -349,6 +391,56 @@ def cmd_stats(args: argparse.Namespace, config: Config) -> int:
         for sensor in storage.sensors():
             label = f" « {sensor['label']} »" if sensor["label"] else ""
             print(f"  {sensor['address']}{label} : {sensor['count']} mesure(s)")
+    return 0
+
+
+def cmd_cert(args: argparse.Namespace, config: Config) -> int:
+    directory = args.directory or default_tls_dir()
+    try:
+        bundle, ca_created = generate(
+            directory,
+            names=args.names,
+            addresses=args.addresses,
+            days=args.days,
+            force=args.force,
+        )
+        info = describe(bundle.cert)
+    except TlsError as exc:
+        print(f"Erreur : {exc}", file=sys.stderr)
+        return 1
+
+    print("Certificat créé.")
+    print(f"  certificat : {bundle.cert}")
+    print(f"  clé privée : {bundle.key}")
+    print(f"  autorité   : {bundle.ca_cert}")
+    print(f"  couvre     : {', '.join(info.subjects())}")
+    print(f"  expire le  : {_fmt_ts(int(info.not_after.timestamp()))} ({info.days_left} jours)")
+
+    print("\nÀ faire ensuite :")
+    print("  1. Ajoutez ces deux lignes à /etc/tempi/tempi.env, puis")
+    print("     « sudo systemctl restart tempi » :")
+    print(f"       TEMPI_TLS_CERT={bundle.cert}")
+    print(f"       TEMPI_TLS_KEY={bundle.key}")
+    if ca_created:
+        print(f"  2. Installez l'autorité {bundle.ca_cert.name} sur chaque appareil :")
+        print("     copiez-la (AirDrop, courriel, clé USB), ouvrez-la, puis")
+        print("     iOS     : Réglages > Profil téléchargé > Installer, puis")
+        print("               Réglages > Général > Informations > Réglages de confiance")
+        print("               des certificats > activez « tempi local CA »")
+        print("     Android : Paramètres > Sécurité > Chiffrement > Installer un certificat")
+        print("     macOS   : Trousseau d'accès > Système > double-clic > Toujours approuver")
+    else:
+        print("  2. Rien à faire sur les appareils : l'autorité déjà installée signe")
+        print("     ce nouveau certificat.")
+    print("\nÀ renouveler avant expiration : « sudo tempi cert --force ».")
+
+    if os.geteuid() != 0:
+        print(
+            f"\nNote : lancé sans sudo, la clé appartient à votre compte. Le service "
+            f"tourne sous l'utilisateur « {SERVICE_USER} » et doit pouvoir la lire :\n"
+            f"  sudo chgrp {SERVICE_USER} {bundle.key} && sudo chmod 640 {bundle.key}",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -521,6 +613,51 @@ def _check_storage(config: Config) -> Check:
     )
 
 
+def _check_tls(config: Config) -> Check:
+    """Vérifie le certificat : présent, lisible par le service, non expiré."""
+    if not config.tls:
+        return Check(
+            "HTTPS",
+            None,
+            "désactivé, l'interface répond en clair",
+            "« sudo tempi cert » fabrique un certificat, puis renseignez "
+            "TEMPI_TLS_CERT et TEMPI_TLS_KEY.",
+        )
+
+    try:
+        # Charger le certificat *et* la clé, comme le fera le serveur : c'est le
+        # seul moyen de détecter une clé illisible ou dépareillée avant le
+        # démarrage plutôt qu'à la première connexion.
+        load_context(config.tls_cert, config.tls_key)
+    except TlsError as exc:
+        return Check("HTTPS", False, str(exc), critical=True)
+
+    try:
+        info = describe(config.tls_cert)
+    except TlsError as exc:
+        # Le serveur démarrera : seule l'inspection a échoué, faute d'openssl
+        # le plus souvent. Ce n'est pas une panne.
+        return Check("HTTPS", None, f"certificat chargé, expiration non vérifiable ({exc})")
+
+    subjects = ", ".join(info.subjects())
+    if info.expired:
+        return Check(
+            "HTTPS",
+            False,
+            f"certificat expiré depuis le {info.not_after:%Y-%m-%d}",
+            "Renouvelez-le : « sudo tempi cert --force », puis redémarrez le service.",
+            critical=True,
+        )
+    if info.days_left <= RENEW_WARNING_DAYS:
+        return Check(
+            "HTTPS",
+            None,
+            f"certificat valable encore {info.days_left} jour(s) ({subjects})",
+            "Renouvelez-le : « sudo tempi cert --force », puis redémarrez le service.",
+        )
+    return Check("HTTPS", True, f"certificat valable {info.days_left} jours ({subjects})")
+
+
 def _check_service() -> Check:
     binary = shutil.which("systemctl")
     if binary is None:
@@ -597,6 +734,7 @@ def cmd_doctor(args: argparse.Namespace, config: Config) -> int:
     checks.append(diagnose_gpio(level, function))
     checks.extend(_check_sensor_reads(bus, inventory.sensors))
     checks.append(_check_storage(config))
+    checks.append(_check_tls(config))
     checks.append(_check_service())
 
     ok, message = summarise(checks)

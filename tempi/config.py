@@ -95,9 +95,23 @@ class Config:
     host: str
     port: int
 
+    # Chiffrement. Les deux vont de pair : sans eux, l'interface répond en clair.
+    tls_cert: Path | None = None
+    tls_key: Path | None = None
+
+    @property
+    def tls(self) -> bool:
+        return self.tls_cert is not None and self.tls_key is not None
+
+    @property
+    def scheme(self) -> str:
+        return "https" if self.tls else "http"
+
     @classmethod
     def from_env(cls) -> "Config":
         db = _env_str("TEMPI_DB", None)
+        tls_cert = _env_str("TEMPI_TLS_CERT", None)
+        tls_key = _env_str("TEMPI_TLS_KEY", None)
         return cls(
             db_path=Path(db) if db else default_db_path(),
             w1_dir=Path(_env_str("TEMPI_W1_DIR", str(DEFAULT_W1_DIR))),
@@ -110,6 +124,8 @@ class Config:
             retention_days=_env_int("TEMPI_RETENTION_DAYS", 0),
             host=_env_str("TEMPI_HOST", "127.0.0.1"),
             port=_env_int("TEMPI_PORT", 8080),
+            tls_cert=Path(tls_cert) if tls_cert else None,
+            tls_key=Path(tls_key) if tls_key else None,
         )
 
     def validate(self) -> None:
@@ -128,3 +144,12 @@ class Config:
             raise ValueError("la rétention ne peut pas être négative")
         if not 1 <= self.port <= 65535:
             raise ValueError("le port doit être compris entre 1 et 65535")
+        if (self.tls_cert is None) != (self.tls_key is None):
+            raise ValueError(
+                "le certificat et la clé vont de pair : précisez TEMPI_TLS_CERT et TEMPI_TLS_KEY"
+            )
+        # Vérifié ici plutôt qu'à l'ouverture du socket : le service échoue au
+        # démarrage, avec le chemin fautif, au lieu de refuser les connexions.
+        for label, path in (("certificat", self.tls_cert), ("clé privée", self.tls_key)):
+            if path is not None and not path.is_file():
+                raise ValueError(f"{label} introuvable : {path}")

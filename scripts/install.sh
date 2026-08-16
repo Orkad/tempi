@@ -116,12 +116,22 @@ sleep 2
 if systemctl is-active --quiet "$SERVICE"; then
     port="$(grep -oP '^\s*TEMPI_PORT=\K\d+' "$CONFIG_DIR/tempi.env" 2>/dev/null || echo 8080)"
     host="$(grep -oP '^\s*TEMPI_HOST=\K\S+' "$CONFIG_DIR/tempi.env" 2>/dev/null || echo 127.0.0.1)"
+    # Le service sert en TLS dès qu'un certificat est configuré : annoncer
+    # http:// dans ce cas enverrait sur une adresse qui ne répond pas.
+    if grep -qE '^\s*TEMPI_TLS_CERT=\S' "$CONFIG_DIR/tempi.env" 2>/dev/null; then
+        scheme=https
+    else
+        scheme=http
+    fi
     info "tempi est actif."
     if [[ $host == "0.0.0.0" || $host == "::" ]]; then
-        info "Interface : http://$(hostname -I | awk '{print $1}'):$port/"
+        info "Interface : $scheme://$(hostname -I | awk '{print $1}'):$port/"
     else
-        info "Interface : http://127.0.0.1:$port/ (accessible depuis le Raspberry Pi uniquement)."
+        info "Interface : $scheme://127.0.0.1:$port/ (accessible depuis le Raspberry Pi uniquement)."
         info "Pour l'ouvrir au réseau local : TEMPI_HOST=0.0.0.0 dans $CONFIG_DIR/tempi.env"
+    fi
+    if [[ $scheme == http ]]; then
+        info "Pour chiffrer la connexion (HTTPS) : sudo tempi cert"
     fi
     info "Journal : journalctl -u $SERVICE -f"
 else
