@@ -13,7 +13,6 @@
     --text: #1b1f24;
     --muted: #616a75;
     --accent: #2f6fd0;
-    --grid: #e7eaee;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -23,7 +22,6 @@
       --text: #e8eaed;
       --muted: #9aa4b0;
       --accent: #6ea8fe;
-      --grid: #262b33;
     }
   }
   * { box-sizing: border-box; }
@@ -74,13 +72,38 @@
   #ranges button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
   .spacer { flex: 1; }
   a { color: var(--accent); }
-  .legend { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .5rem; font-size: .85rem; }
-  .legend button { display: flex; align-items: center; gap: .4rem; border: none; background: none; color: var(--text); padding: .15rem .3rem; }
+  /* Le graphique est un appareil de mesure : il garde son fond profond dans les
+     deux thèmes, pour que les tracés restent lisibles de loin — le Raspberry Pi
+     et son écran sont rarement dans les mêmes conditions d'éclairage que le
+     poste depuis lequel on consulte l'interface. Les couleurs du tracé ne
+     dépendent donc pas du thème et sont déclarées ici une seule fois. */
+  .plot {
+    --plot-bg: #10141a;
+    --plot-grid: #1c232c;
+    --plot-axis: #8b95a2;
+    --plot-rule: #2b333d;
+    --plot-ink: #dfe5ec;
+    background: var(--plot-bg);
+    border-radius: 8px;
+    padding: .5rem .6rem .35rem;
+  }
+  .legend { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .35rem; font-size: .85rem; }
+  .legend button { display: flex; align-items: center; gap: .4rem; border: none; background: none; color: var(--plot-ink); padding: .15rem .3rem; }
   .legend .swatch { width: .75rem; height: .75rem; border-radius: 3px; }
   .legend button[aria-pressed="false"] { opacity: .4; }
   #chart { width: 100%; height: 380px; display: block; touch-action: none; }
-  .axis { fill: var(--muted); font-size: 11px; }
-  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .axis {
+    fill: var(--plot-axis);
+    font-size: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .axis-value { fill: var(--plot-ink); font-weight: 600; }
+  .gridline { stroke: var(--plot-grid); stroke-width: 1; stroke-dasharray: 1 5; stroke-linecap: round; }
+  .baseline { stroke: var(--plot-rule); stroke-width: 1; }
+  .cursor { stroke: var(--plot-axis); stroke-opacity: .5; stroke-dasharray: 3 3; }
+  /* Le cerne à la couleur du fond détache le point de la courbe qu'il marque. */
+  .endpoint { stroke: var(--plot-bg); stroke-width: 2; }
+  .empty-note { fill: var(--plot-axis); font-size: 13px; }
   .empty { color: var(--muted); text-align: center; padding: 3rem 1rem; }
   /* La table à six colonnes est plus large qu'un écran de téléphone. Elle défile
      dans son propre conteneur : sans cela, elle élargit tout le document et
@@ -135,8 +158,10 @@
     <button id="refresh" title="Rafraîchir maintenant">Rafraîchir</button>
     <a id="csv" href="#" download>Export CSV</a>
   </div>
-  <svg id="chart" role="img" aria-label="Évolution de la température"></svg>
-  <div class="legend" id="legend"></div>
+  <div class="plot">
+    <svg id="chart" role="img" aria-label="Évolution de la température"></svg>
+    <div class="legend" id="legend"></div>
+  </div>
 </div>
 
 <div class="panel">
@@ -155,7 +180,14 @@
 <script>
 "use strict";
 
-const PALETTE = ["#2f6fd0", "#d1642c", "#2e9e6b", "#a855c7", "#c9a227", "#0f9bb0", "#d0417e", "#6b7280"];
+/**
+ * Teintes calibrées pour le fond profond du graphique : chacune tient au moins
+ * 3:1 de contraste dessus, et deux teintes voisines restent distinguables en
+ * vision déficiente (écart minimal de 8,4 en protanopie). L'ordre compte : il a
+ * été retenu parce que ce sont les couples consécutifs, ceux que l'on compare le
+ * plus souvent, qui doivent le mieux se séparer.
+ */
+const PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
 const RANGES = [
   { key: "1h",  label: "1 h"    },
   { key: "6h",  label: "6 h"    },
@@ -270,13 +302,16 @@ function drawChart() {
     text.setAttribute("x", width / 2);
     text.setAttribute("y", height / 2);
     text.setAttribute("text-anchor", "middle");
-    text.setAttribute("class", "axis");
+    text.setAttribute("class", "empty-note");
     text.textContent = "Aucune mesure sur cette période";
     svg.appendChild(text);
     return;
   }
 
-  const margin = { top: 12, right: 14, bottom: 26, left: 46 };
+  // Au-delà de quatre courbes, les étiquettes de bout se marchent dessus quelle
+  // que soit la stratégie de répartition : la légende reprend seule ce rôle.
+  const labelled = shown.length <= 4;
+  const margin = { top: 14, right: labelled ? 76 : 16, bottom: 24, left: 44 };
   const plotW = Math.max(10, width - margin.left - margin.right);
   const plotH = Math.max(10, height - margin.top - margin.bottom);
 
@@ -293,58 +328,92 @@ function drawChart() {
   const x = (ts) => margin.left + ((ts - t0) / (t1 - t0)) * plotW;
   const y = (c) => margin.top + plotH - ((c - scale.lo) / (scale.hi - scale.lo)) * plotH;
 
-  const add = (tag, attrs, cls) => {
+  const add = (tag, attrs, cls, parent) => {
     const el = document.createElementNS(svgNS, tag);
     for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
     if (cls) el.setAttribute("class", cls);
-    svg.appendChild(el);
+    (parent || svg).appendChild(el);
     return el;
   };
 
-  // Grille + axe des ordonnées
+  /* Le halo épaissit optiquement les tracés sans élargir le trait : la courbe
+     reste fine — donc précise à lire — tout en restant visible à quelques
+     mètres, sur l'écran accroché près du Raspberry Pi. */
+  const defs = add("defs", {});
+  const glow = add("filter", {
+    id: "halo", x: "-20%", y: "-20%", width: "140%", height: "140%",
+  }, null, defs);
+  add("feGaussianBlur", { stdDeviation: 3, result: "flou" }, null, glow);
+  const merge = add("feMerge", {}, null, glow);
+  add("feMergeNode", { in: "flou" }, null, merge);
+  add("feMergeNode", { in: "SourceGraphic" }, null, merge);
+
+  /* Seules les horizontales sont tracées : ce sont elles qui portent la lecture
+     des degrés. Un quadrillage vertical ajouterait un réseau de traits qui
+     concurrence les courbes sans rien apprendre — les étiquettes de temps
+     suffisent à situer un point dans la fenêtre. */
   for (let c = scale.lo; c <= scale.hi + 1e-9; c += scale.step) {
     const yy = y(c);
     add("line", { x1: margin.left, y1: yy, x2: margin.left + plotW, y2: yy }, "gridline");
-    const label = add("text", { x: margin.left - 8, y: yy + 4, "text-anchor": "end" }, "axis");
+    const label = add("text", { x: margin.left - 8, y: yy + 3.5, "text-anchor": "end" }, "axis");
     label.textContent = (Math.round(c * 10) / 10).toFixed(1);
   }
+  add("line", {
+    x1: margin.left, y1: margin.top + plotH,
+    x2: margin.left + plotW, y2: margin.top + plotH,
+  }, "baseline");
 
   // Axe des abscisses
   for (const ts of timeTicks(t0, t1, Math.max(2, Math.floor(plotW / 90)))) {
-    const xx = x(ts);
-    add("line", { x1: xx, y1: margin.top, x2: xx, y2: margin.top + plotH }, "gridline");
-    const label = add("text", { x: xx, y: height - 8, "text-anchor": "middle" }, "axis");
+    const label = add("text", { x: x(ts), y: height - 7, "text-anchor": "middle" }, "axis");
     label.textContent = fmtTick(ts, t1 - t0);
   }
 
+  // Les courbes partagent un seul groupe filtré : appliquer le halo à chaque
+  // tracé séparément multiplierait les passes de flou sans rien changer au rendu.
+  const traces = add("g", { filter: "url(#halo)" });
+  const endLabels = [];
+
   for (const s of shown) {
     const color = colorFor(s.address);
-    const gap = gapFor(s.points);
+    const runs = runsOf(s.points, gapFor(s.points));
 
     if (state.bucket > 0 && s.points.some((p) => p.samples > 1)) {
-      let top = "", bottom = "";
-      let open = false;
-      for (let i = 0; i < s.points.length; i++) {
-        const p = s.points[i];
-        const broken = i > 0 && p.ts - s.points[i - 1].ts > gap;
-        if (broken && open) { top += " " + bottom + " Z"; bottom = ""; open = false; }
-        if (!open) { top += ` M ${x(p.ts)} ${y(p.max)}`; bottom = `L ${x(p.ts)} ${y(p.min)}`; open = true; }
-        else { top += ` L ${x(p.ts)} ${y(p.max)}`; bottom = `L ${x(p.ts)} ${y(p.min)} ` + bottom; }
+      let d = "";
+      for (const run of runs) {
+        const xs = run.map((p) => x(p.ts));
+        d += curvePath(xs, run.map((p) => y(p.max))) + " " +
+             curvePath([...xs].reverse(), run.map((p) => y(p.min)).reverse()).replace(/^M/, "L") +
+             " Z";
       }
-      if (open) top += " " + bottom + " Z";
-      add("path", { d: top, fill: color, "fill-opacity": .16, stroke: "none" });
+      add("path", { d, fill: color, "fill-opacity": .16, stroke: "none" });
     }
 
-    let d = "";
-    for (let i = 0; i < s.points.length; i++) {
-      const p = s.points[i];
-      const broken = i > 0 && p.ts - s.points[i - 1].ts > gap;
-      d += (i === 0 || broken ? " M " : " L ") + x(p.ts) + " " + y(p.celsius);
+    for (const run of runs) {
+      add("path", {
+        d: curvePath(run.map((p) => x(p.ts)), run.map((p) => y(p.celsius))),
+        fill: "none", stroke: color, "stroke-width": 2.2,
+        "stroke-linejoin": "round", "stroke-linecap": "round",
+      }, null, traces);
     }
-    add("path", {
-      d, fill: "none", stroke: color, "stroke-width": 1.8,
-      "stroke-linejoin": "round", "stroke-linecap": "round",
-    });
+
+    const last = s.points[s.points.length - 1];
+    add("circle", { cx: x(last.ts), cy: y(last.celsius), r: 3.4, fill: color }, "endpoint");
+    if (labelled) {
+      endLabels.push({ y: y(last.celsius), color, name: nameFor(s), celsius: last.celsius });
+    }
+  }
+
+  /* Étiquette de bout : le nom et la valeur se lisent au bout de la courbe, sans
+     aller-retour vers la légende. Le texte porte l'encre de l'interface et non
+     la couleur du capteur — c'est la pastille qui identifie, et un nom écrit en
+     couleur de série perdrait en lisibilité sur le fond profond. */
+  for (const label of spreadLabels(endLabels, margin.top, margin.top + plotH)) {
+    const lx = margin.left + plotW + 10;
+    add("rect", { x: lx, y: label.y - 10, width: 7, height: 7, rx: 2, fill: label.color });
+    add("text", { x: lx + 11, y: label.y - 4 }, "axis").textContent = ellipsis(label.name, 9);
+    add("text", { x: lx + 11, y: label.y + 10 }, "axis axis-value").textContent =
+      fmtTemp(label.celsius);
   }
 
   // Curseur de survol
@@ -353,11 +422,14 @@ function drawChart() {
     if (xx >= margin.left && xx <= margin.left + plotW) {
       add("line", {
         x1: xx, y1: margin.top, x2: xx, y2: margin.top + plotH,
-        stroke: "currentColor", "stroke-opacity": .35, "stroke-dasharray": "3 3",
-      });
+      }, "cursor");
       for (const s of shown) {
         const p = nearestPoint(s, state.hover);
-        if (p) add("circle", { cx: x(p.ts), cy: y(p.celsius), r: 3.5, fill: colorFor(s.address) });
+        if (p) {
+          add("circle", {
+            cx: x(p.ts), cy: y(p.celsius), r: 4, fill: colorFor(s.address),
+          }, "endpoint");
+        }
       }
     }
   }
@@ -381,6 +453,91 @@ function gapFor(points) {
   deltas.sort((a, b) => a - b);
   const median = deltas[Math.floor(deltas.length / 2)];
   return Math.max(median * 3, state.bucket * 3, 1);
+}
+
+/** Découpe une série en segments continus : au-delà de `gap`, on ne relie pas. */
+function runsOf(points, gap) {
+  const runs = [];
+  let run = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i > 0 && points[i].ts - points[i - 1].ts > gap && run.length) {
+      runs.push(run);
+      run = [];
+    }
+    run.push(points[i]);
+  }
+  if (run.length) runs.push(run);
+  return runs;
+}
+
+/**
+ * Tracé lissé passant par tous les points, en cubiques de Fritsch–Carlson.
+ *
+ * Le choix de cette famille de tangentes n'est pas cosmétique : une spline
+ * cardinale ordinaire dépasse les valeurs voisines dans les virages et
+ * inventerait des pics de température qui n'ont jamais été relevés. Celle-ci est
+ * monotone par construction — entre deux mesures, la courbe reste bornée par
+ * elles.
+ */
+function curvePath(xs, ys) {
+  const n = xs.length;
+  if (!n) return "";
+  if (n === 1) return `M ${xs[0]} ${ys[0]}`;
+
+  const slopes = [];
+  for (let i = 0; i < n - 1; i++) {
+    const dx = xs[i + 1] - xs[i];
+    slopes.push(dx === 0 ? 0 : (ys[i + 1] - ys[i]) / dx);
+  }
+
+  const tangents = new Array(n);
+  tangents[0] = slopes[0];
+  tangents[n - 1] = slopes[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    // Un changement de sens est un extremum local : y imposer une tangente nulle
+    // est ce qui empêche la courbe de déborder au-delà du point mesuré.
+    tangents[i] = slopes[i - 1] * slopes[i] <= 0 ? 0 : (slopes[i - 1] + slopes[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (slopes[i] === 0) { tangents[i] = 0; tangents[i + 1] = 0; continue; }
+    const a = tangents[i] / slopes[i], b = tangents[i + 1] / slopes[i];
+    const norm = Math.hypot(a, b);
+    if (norm > 3) {
+      tangents[i] = (3 / norm) * a * slopes[i];
+      tangents[i + 1] = (3 / norm) * b * slopes[i];
+    }
+  }
+
+  let d = `M ${xs[0]} ${ys[0]}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dx = (xs[i + 1] - xs[i]) / 3;
+    d += ` C ${xs[i] + dx} ${ys[i] + tangents[i] * dx}` +
+         ` ${xs[i + 1] - dx} ${ys[i + 1] - tangents[i + 1] * dx}` +
+         ` ${xs[i + 1]} ${ys[i + 1]}`;
+  }
+  return d;
+}
+
+/**
+ * Écarte les étiquettes de bout qui se superposeraient : deux capteurs à la même
+ * température finissent à la même hauteur. On descend celles qui se touchent,
+ * puis on remonte le paquet entier s'il déborde du cadre.
+ */
+function spreadLabels(labels, top, bottom) {
+  const MIN = 26;
+  const sorted = [...labels].sort((a, b) => a.y - b.y);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].y - sorted[i - 1].y < MIN) sorted[i].y = sorted[i - 1].y + MIN;
+  }
+  const overflow = sorted.length ? sorted[sorted.length - 1].y - (bottom - 2) : 0;
+  if (overflow > 0) {
+    for (const label of sorted) label.y = Math.max(top + 10, label.y - overflow);
+  }
+  return sorted;
+}
+
+function ellipsis(value, max) {
+  return value.length <= max ? value : value.slice(0, max - 1) + "…";
 }
 
 function nearestPoint(series, ts) {
