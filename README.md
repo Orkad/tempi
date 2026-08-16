@@ -7,6 +7,8 @@ ou plusieurs capteurs **DS18B20** sur un **Raspberry Pi**.
 - stockage dans une base **SQLite** unique, sans serveur à administrer ;
 - interface web avec graphique, plages de 1 heure à « tout l'historique »,
   statistiques et export CSV ;
+- **température extérieure** relevée sur une API publique et traitée comme un
+  capteur supplémentaire, pour comparer l'intérieur au dehors ;
 - **aucune dépendance externe** : uniquement la bibliothèque standard de Python,
   donc pas de compilation ni de `pip install` d'un paquet lourd sur le Pi ;
 - service `systemd` prêt à l'emploi.
@@ -119,6 +121,7 @@ tempi read                       # lecture immédiate, sans rien enregistrer
 tempi collect                    # boucle de collecte seule
 tempi serve                      # interface web seule
 tempi run                        # collecte + interface dans un seul processus
+tempi outdoor                    # vérifie la source de température extérieure
 tempi label 28-000005e2fdc3 Salon
 tempi stats
 tempi export --range 30d -o mesures.csv
@@ -160,6 +163,13 @@ par les options de la ligne de commande. Pour le service, éditez
 | `TEMPI_READ_RETRIES` | `3` | tentatives par relevé avant abandon |
 | `TEMPI_ALLOW_RESET_VALUE` | `0` | accepter la valeur suspecte de 85 °C |
 | `TEMPI_SIMULATE` | `0` | capteur virtuel, sans matériel |
+| `TEMPI_OUTDOOR_PROVIDER` | — | source extérieure : `metar`, `infoclimat`, `open-meteo` |
+| `TEMPI_OUTDOOR_STATION` | — | code OACI (`metar`) ou identifiant StatIC (`infoclimat`) |
+| `TEMPI_OUTDOOR_LAT` / `TEMPI_OUTDOOR_LON` | — | coordonnées, pour `open-meteo` |
+| `TEMPI_OUTDOOR_TOKEN` | — | clé d'API, pour `infoclimat` |
+| `TEMPI_OUTDOOR_LABEL` | `Extérieur` | nom affiché du pseudo-capteur |
+| `TEMPI_OUTDOOR_INTERVAL` | `600` | secondes entre deux interrogations (minimum 60) |
+| `TEMPI_OUTDOOR_TIMEOUT` | `10` | délai d'attente réseau, en secondes |
 
 ### Bande morte et usure de la carte SD
 
@@ -175,12 +185,91 @@ toujours.
 
 `TEMPI_RETENTION_DAYS` supprime en plus les mesures anciennes, une fois par jour.
 
+### Température extérieure
+
+Une courbe intérieure ne se lit bien qu'en regard de la température extérieure.
+tempi peut la relever sur une API publique et l'enregistrer **comme un capteur
+de plus** : elle apparaît dans le graphique, les statistiques, l'export CSV et
+l'API HTTP sans rien de particulier à faire. Son adresse a la forme
+`outdoor-<fournisseur>-<station>` et son nom par défaut est « Extérieur » ;
+comme tout capteur, il se renomme depuis l'interface web.
+
+```bash
+# Observation d'une station réelle, sans clé d'API
+TEMPI_OUTDOOR_PROVIDER=metar TEMPI_OUTDOOR_STATION=LFLY tempi outdoor
+```
+
+```
+$ tempi outdoor
+Source   : METAR LFLY
+Capteur  : outdoor-metar-LFLY « Extérieur »
+Mesure   : 21.7 °C
+Observée : 2026-08-16 19:05:32 (il y a 10 min)
+```
+
+La commande `tempi outdoor` ne fait que vérifier la source, comme `tempi read`
+pour le bus 1-Wire ; `--store` enregistre le relevé. Une fois la configuration
+en place, `tempi collect` et `tempi run` interrogent la source d'eux-mêmes.
+
+| Fournisseur | Clé | Nature de la donnée |
+|---|---|---|
+| `metar` | aucune | **mesure réelle** sous abri normalisé, sur un aérodrome (souvent excentré) |
+| `infoclimat` | gratuite | **mesure réelle** du réseau StatIC, bien plus dense en ville |
+| `open-meteo` | aucune | **sortie de modèle** interpolée sur une grille de quelques kilomètres |
+
+Aucune API ne donne la température mesurée *à une adresse* : une mesure vient
+d'une station physique. Le choix se ramène donc à un arbitrage entre proximité
+et fiabilité. À Lyon, `LFLY` (Bron) est à environ 8 km de la Presqu'île, où
+l'îlot de chaleur urbain crée couramment 2 à 4 °C d'écart la nuit ; une station
+StatIC intra-muros sera nettement plus représentative.
+
+**`metar`** — code OACI à quatre lettres, via aviationweather.gov (NOAA) :
+
+```
+TEMPI_OUTDOOR_PROVIDER=metar
+TEMPI_OUTDOOR_STATION=LFLY
+```
+
+**`infoclimat`** — réseau StatIC, identifiant de station et clé obtenue sur
+[infoclimat.fr/opendata](https://www.infoclimat.fr/opendata/) après création
+d'un compte et déclaration d'un usage commercial ou non :
+
+```
+TEMPI_OUTDOOR_PROVIDER=infoclimat
+TEMPI_OUTDOOR_STATION=000JT
+TEMPI_OUTDOOR_TOKEN=…
+```
+
+> La clé Infoclimat est liée à **l'adresse IP appelante**. Derrière une IP
+> résidentielle dynamique, elle cesse de fonctionner à chaque changement d'IP ;
+> tempi le signale alors dans le journal et continue d'enregistrer les DS18B20.
+> Les données sont sous Licence Ouverte ou Creative Commons selon la station :
+> citez « Infoclimat (StatIC) » si vous les rediffusez.
+
+**`open-meteo`** — coordonnées décimales, sans inscription :
+
+```
+TEMPI_OUTDOOR_PROVIDER=open-meteo
+TEMPI_OUTDOOR_LAT=45.7578
+TEMPI_OUTDOOR_LON=4.8320
+```
+
+Trois précautions valent pour les trois fournisseurs :
+
+- l'horodatage enregistré est celui **de l'observation**, pas celui de la
+  requête, sinon la courbe extérieure serait décalée du délai de diffusion ;
+- une observation déjà connue n'est pas réenregistrée — les stations ne
+  publient que toutes les 6 à 60 minutes, d'où un `TEMPI_OUTDOOR_INTERVAL` par
+  défaut de 10 minutes et un plancher à 60 secondes ;
+- l'interrogation tourne dans son propre thread. Une API lente ou indisponible
+  décale la courbe extérieure, jamais les relevés du DS18B20.
+
 ## 6. API HTTP
 
 | Méthode et route | Description |
 |---|---|
 | `GET /` | interface web |
-| `GET /api/health` | état du service, de la base et du collecteur |
+| `GET /api/health` | état du service, de la base, du collecteur et de la source extérieure |
 | `GET /api/sensors` | capteurs connus |
 | `GET /api/latest` | dernière mesure de chaque capteur |
 | `GET /api/series` | points d'une plage, éventuellement agrégés |
@@ -299,6 +388,7 @@ Organisation du code :
 | `tempi/sensor.py` | lecture du bus 1-Wire, validation des trames, capteur simulé |
 | `tempi/storage.py` | schéma SQLite, écriture, requêtes, agrégation, purge |
 | `tempi/collector.py` | boucle de collecte, bande morte, rétention |
+| `tempi/outdoor.py` | température extérieure d'une API publique, exposée comme un capteur |
 | `tempi/web.py` | serveur HTTP, API JSON, export CSV |
 | `tempi/diagnostics.py` | analyse de l'état du bus, sans accès système — donc testable partout |
 | `tempi/cli.py` | ligne de commande |

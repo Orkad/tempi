@@ -173,6 +173,22 @@ class Storage:
         ).fetchone()
         return row["id"] if row else None
 
+    def ensure_sensor(self, address: str, label: str | None = None) -> int | None:
+        """Déclare un capteur et lui donne un nom par défaut s'il n'en a pas.
+
+        Le nom n'est posé qu'à la création : un capteur renommé depuis
+        l'interface web ne doit pas retrouver son libellé d'origine au
+        redémarrage du service.
+        """
+        with self._lock:
+            sid = self.sensor_id(address)
+            if label:
+                self.conn.execute(
+                    "UPDATE sensors SET label = ? WHERE id = ? AND label IS NULL",
+                    (label, sid),
+                )
+            return sid
+
     def set_label(self, address: str, label: str | None) -> bool:
         """Nomme un capteur (« Salon », « Congélateur »…)."""
         cursor = self.conn.execute(

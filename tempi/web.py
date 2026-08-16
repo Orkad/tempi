@@ -98,6 +98,7 @@ class Handler(BaseHTTPRequestHandler):
     storage: Storage
     config: Config
     collector = None
+    outdoor = None
 
     # -- utilitaires de réponse --------------------------------------------
 
@@ -196,6 +197,18 @@ class Handler(BaseHTTPRequestHandler):
                 "last_cycle_ts": self.collector.last_cycle_ts,
                 "interval": self.config.interval,
             }
+        if self.outdoor is not None:
+            poller = self.outdoor.poller
+            payload["outdoor"] = {
+                "source": poller.source.describe(),
+                "address": poller.address,
+                "polls": poller.polls,
+                "stored": poller.stored,
+                "errors": poller.errors,
+                "last_ok_ts": poller.last_ok_ts,
+                "last_error": poller.last_error,
+                "interval": self.outdoor.interval,
+            }
         self._send_json(payload)
 
     def _api_sensors(self) -> None:
@@ -287,21 +300,23 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"address": address, "label": label})
 
 
-def make_server(config: Config, storage: Storage, collector=None) -> ThreadingHTTPServer:
+def make_server(
+    config: Config, storage: Storage, collector=None, outdoor=None
+) -> ThreadingHTTPServer:
     """Construit le serveur HTTP sans le démarrer."""
     handler = type(
         "BoundHandler",
         (Handler,),
-        {"storage": storage, "config": config, "collector": collector},
+        {"storage": storage, "config": config, "collector": collector, "outdoor": outdoor},
     )
     server = ThreadingHTTPServer((config.host, config.port), handler)
     server.daemon_threads = True
     return server
 
 
-def serve(config: Config, storage: Storage, collector=None) -> None:
+def serve(config: Config, storage: Storage, collector=None, outdoor=None) -> None:
     """Démarre le serveur et bloque jusqu'à l'interruption."""
-    server = make_server(config, storage, collector)
+    server = make_server(config, storage, collector, outdoor)
     host = config.host if config.host not in ("0.0.0.0", "::") else "<toutes interfaces>"
     log.info("interface web disponible sur http://%s:%d/", host, server.server_address[1])
     try:
