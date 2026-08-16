@@ -194,7 +194,17 @@ function colorFor(address) {
 
 function nameFor(s) { return s.label || s.address; }
 
-function fmtTemp(v) { return v == null ? "—" : v.toFixed(1) + " °C"; }
+/**
+ * Le DS18B20 est donné à ±0,5 °C par sa fiche technique. Sa résolution de
+ * 0,0625 °C ne compense pas cette incertitude : afficher le centième afficherait
+ * du bruit avec l'apparence d'une mesure. Les valeurs brutes restent entières
+ * dans la base, dans l'API et dans l'export CSV.
+ */
+const DECIMALS = 1;
+
+function fmtDeg(v) { return v == null ? "—" : v.toFixed(DECIMALS); }
+
+function fmtTemp(v) { return v == null ? "—" : fmtDeg(v) + " °C"; }
 
 function fmtAge(seconds) {
   if (seconds == null) return "jamais";
@@ -434,8 +444,8 @@ function renderSummary(summary) {
     const row = document.createElement("tr");
     row.innerHTML =
       `<td>${escapeHtml(labels.get(address) || address)}</td>` +
-      `<td>${stats.min.toFixed(2)}</td><td>${stats.avg.toFixed(2)}</td><td>${stats.max.toFixed(2)}</td>` +
-      `<td>${(stats.max - stats.min).toFixed(2)}</td><td>${stats.samples}</td>`;
+      `<td>${fmtDeg(stats.min)}</td><td>${fmtDeg(stats.avg)}</td><td>${fmtDeg(stats.max)}</td>` +
+      `<td>${fmtDeg(stats.max - stats.min)}</td><td>${stats.samples}</td>`;
     body.appendChild(row);
   }
 }
@@ -555,9 +565,9 @@ function setupHover() {
     for (const s of visibleSeries()) {
       const point = nearestPoint(s, state.hover);
       if (!point) continue;
-      const extra = point.samples > 1 ? ` <span style="opacity:.6">(${point.min.toFixed(1)} – ${point.max.toFixed(1)})</span>` : "";
+      const extra = point.samples > 1 ? ` <span style="opacity:.6">(${fmtDeg(point.min)} – ${fmtDeg(point.max)})</span>` : "";
       rows.push(`<div class="row"><span class="swatch" style="background:${colorFor(s.address)}"></span>` +
-                `<span>${escapeHtml(nameFor(s))}</span><b>${point.celsius.toFixed(2)} °C</b>${extra}</div>`);
+                `<span>${escapeHtml(nameFor(s))}</span><b>${fmtTemp(point.celsius)}</b>${extra}</div>`);
     }
     if (!rows.length) return hide();
 

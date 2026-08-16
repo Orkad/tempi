@@ -38,6 +38,15 @@ adresse unique gravée en usine, et tempi les découvre automatiquement.
 > Le montage « en parasite » (VDD relié à GND) fonctionne mal au-delà de
 > quelques dizaines de centimètres. Alimentez le capteur en 3,3 V.
 
+### Précision affichée
+
+Le DS18B20 est donné à **±0,5 °C** entre −10 et +85 °C, pour une résolution de
+0,0625 °C. La résolution ne compensant pas l'incertitude, tempi affiche le
+dixième de degré : le centième ferait passer du bruit pour une mesure.
+
+Les valeurs restent enregistrées et exposées sans arrondi dans la base, dans
+l'API et dans l'export CSV — seul l'affichage est arrondi.
+
 ## 2. Activation du bus 1-Wire
 
 ```bash
@@ -121,8 +130,8 @@ Exemple :
 ```
 $ tempi sensors
 2 capteur(s) détecté(s) sur le bus :
-  28-000005e2fdc3   21.437 °C
-  28-000005e30a1b    4.812 °C
+  28-000005e2fdc3    21.4 °C
+  28-000005e30a1b     4.8 °C
 
 Capteurs enregistrés dans /var/lib/tempi/tempi.db :
   28-000005e2fdc3 « Salon »  43 210 mesure(s), dernière vue 2026-08-15 10:28:00

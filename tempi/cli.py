@@ -180,7 +180,7 @@ def cmd_sensors(args: argparse.Namespace, config: Config) -> int:
         for address in detected:
             try:
                 celsius = bus.read(address)
-                value = f"{celsius:7.3f} °C"
+                value = f"{celsius:6.1f} °C"
             except SensorError as exc:
                 value = f"erreur : {exc}"
             print(f"  {address}  {value}")
@@ -202,7 +202,7 @@ def cmd_read(args: argparse.Namespace, config: Config) -> int:
     bus = make_bus(config)
     readings, failures = bus.read_all()
     for reading in readings:
-        print(f"{reading.address}  {reading.celsius:7.3f} °C")
+        print(f"{reading.address}  {reading.celsius:6.1f} °C")
     for address, error in failures:
         print(f"{address}  erreur : {error}", file=sys.stderr)
     if not readings and not failures:
@@ -490,6 +490,10 @@ def _check_sensor_reads(bus: W1Bus, addresses: list[str]) -> list[Check]:
         except SensorError as exc:
             checks.append(Check(name, False, str(exc), critical=True))
         else:
+            # Trois décimales ici, contrairement au reste de l'application : le
+            # diagnostic est le seul endroit où la quantification du capteur, par
+            # pas de 0,0625 °C, porte une information — une valeur parfaitement
+            # figée d'une lecture à l'autre trahit un capteur bloqué.
             checks.append(Check(name, True, f"{celsius:.3f} °C"))
     return checks
 
