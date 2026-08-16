@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import __version__
 from .collector import Collector, RetentionThread, apply_retention
-from .config import Config
+from .config import OUTDOOR_PROVIDERS, Config
 from .diagnostics import (
     DEFAULT_W1_GPIO,
     BusInventory,
@@ -31,6 +31,7 @@ from .diagnostics import (
     parse_pinctrl,
     summarise,
 )
+from .outdoor import OutdoorError, OutdoorPoller, address_for, make_source, make_thread
 from .sensor import (
     CrcError,
     OutOfRangeError,
@@ -69,6 +70,35 @@ def _fmt_size(num_bytes: int) -> str:
     return f"{value:.1f} Gio"
 
 
+def _add_outdoor_arguments(sub: argparse._ActionsContainer) -> None:
+    """Options de la source extérieure, communes à ``collect``, ``run`` et ``outdoor``.
+
+    La clé d'API n'y figure volontairement pas : les arguments d'un processus
+    sont lisibles par n'importe quel utilisateur dans ``/proc``. Elle passe
+    uniquement par ``TEMPI_OUTDOOR_TOKEN``.
+    """
+    group = sub.add_argument_group("température extérieure")
+    group.add_argument(
+        "--outdoor-provider",
+        dest="outdoor_provider",
+        choices=[*OUTDOOR_PROVIDERS, "none"],
+        help="source de la température extérieure (défaut : $TEMPI_OUTDOOR_PROVIDER)",
+    )
+    group.add_argument(
+        "--outdoor-station",
+        dest="outdoor_station",
+        help="station : code OACI pour metar (LFLY), identifiant StatIC pour infoclimat",
+    )
+    group.add_argument("--outdoor-lat", dest="outdoor_latitude", type=float,
+                       help="latitude, pour open-meteo")
+    group.add_argument("--outdoor-lon", dest="outdoor_longitude", type=float,
+                       help="longitude, pour open-meteo")
+    group.add_argument("--outdoor-label", dest="outdoor_label",
+                       help="nom affiché du pseudo-capteur (défaut : Extérieur)")
+    group.add_argument("--outdoor-interval", dest="outdoor_interval", type=float,
+                       help="intervalle entre deux interrogations, en secondes (minimum 60)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tempi",
@@ -100,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
                      help="durée maximale sans enregistrement malgré --min-delta, en secondes")
     sub.add_argument("--retention-days", type=int, help="supprime les mesures plus anciennes que N jours")
     sub.add_argument("-n", "--cycles", type=int, help="s'arrête après N cycles (utile pour tester)")
+    _add_outdoor_arguments(sub)
     sub.set_defaults(func=cmd_collect)
 
     sub = subparsers.add_parser("serve", help="lance l'interface web et l'API")
@@ -114,7 +145,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--retention-days", type=int, help="supprime les mesures plus anciennes que N jours")
     sub.add_argument("--host", help="adresse d'écoute (défaut : 127.0.0.1)")
     sub.add_argument("-p", "--port", type=int, help="port d'écoute (défaut : 8080)")
+    _add_outdoor_arguments(sub)
     sub.set_defaults(func=cmd_run)
+
+    sub = subparsers.add_parser(
+        "outdoor",
+        help="interroge la source de température extérieure et affiche le résultat",
+    )
+    sub.add_argument("--store", action="store_true",
+                     help="enregistre la mesure en base au lieu de seulement l'afficher")
+    _add_outdoor_arguments(sub)
+    sub.set_defaults(func=cmd_outdoor)
 
     sub = subparsers.add_parser("export", help="exporte les mesures au format CSV")
     sub.add_argument("--from", dest="start", help="début (epoch ou date ISO 8601)")
@@ -148,7 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _config_from_args(args: argparse.Namespace) -> Config:
     config = Config.from_env()
-    for attr in ("interval", "min_delta", "max_interval", "retention_days", "host", "port", "w1_dir"):
+    for attr in (
+        "interval", "min_delta", "max_interval", "retention_days", "host", "port", "w1_dir",
+        "outdoor_provider", "outdoor_station", "outdoor_latitude", "outdoor_longitude",
+        "outdoor_label", "outdoor_interval",
+    ):
         value = getattr(args, attr, None)
         if value is not None:
             setattr(config, attr, value)
@@ -211,6 +256,51 @@ def cmd_read(args: argparse.Namespace, config: Config) -> int:
     return 1 if failures and not readings else 0
 
 
+def cmd_outdoor(args: argparse.Namespace, config: Config) -> int:
+    """Vérifie la source extérieure : c'est le pendant de ``tempi read``."""
+    try:
+        source = make_source(config)
+    except OutdoorError as exc:
+        print(f"Configuration invalide : {exc}", file=sys.stderr)
+        return 2
+
+    if source is None:
+        print(
+            "Aucune source extérieure configurée : précisez --outdoor-provider "
+            "ou TEMPI_OUTDOOR_PROVIDER (metar, infoclimat, open-meteo).",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"Source   : {source.describe()}")
+    print(f"Capteur  : {address_for(source)} « {config.outdoor_label} »")
+
+    with Storage(config.db_path) as storage:
+        poller = OutdoorPoller(config, storage, source)
+        try:
+            if args.store:
+                reading = poller.poll_once()
+                if reading is None and poller.last_error:
+                    raise OutdoorError(poller.last_error)
+                if reading is None:
+                    print("Observation déjà enregistrée, rien à ajouter.")
+                    return 0
+                observed, celsius = reading.ts, reading.celsius
+            else:
+                observation = poller.observe()
+                observed, celsius = observation.ts, observation.celsius
+        except OutdoorError as exc:
+            print(f"Relevé impossible : {exc}", file=sys.stderr)
+            return 1
+
+    age = max(0, int(time.time()) - observed)
+    print(f"Mesure   : {celsius:.1f} °C")
+    print(f"Observée : {_fmt_ts(observed)} (il y a {age // 60} min)")
+    if args.store:
+        print(f"Enregistrée dans {config.db_path}.")
+    return 0
+
+
 def _install_signal_handlers(*stoppables) -> None:
     def handler(signum, _frame):
         log.info("signal %s reçu, arrêt en cours…", signal.Signals(signum).name)
@@ -227,9 +317,16 @@ def cmd_collect(args: argparse.Namespace, config: Config) -> int:
         collector = Collector(config, storage)
         retention = RetentionThread(config, storage)
         retention.start()
-        _install_signal_handlers(collector, retention)
+        outdoor = make_thread(config, storage)
+        stoppables = [collector, retention]
+        if outdoor is not None:
+            outdoor.start()
+            stoppables.append(outdoor)
+        _install_signal_handlers(*stoppables)
         collector.run(max_cycles=args.cycles)
         retention.stop()
+        if outdoor is not None:
+            outdoor.stop()
     return 0
 
 
@@ -248,21 +345,27 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
         collector = Collector(config, storage)
         retention = RetentionThread(config, storage)
 
+        outdoor = make_thread(config, storage)
+
         collector_thread = threading.Thread(
             target=collector.run, name="tempi-collector", daemon=True
         )
         collector_thread.start()
         retention.start()
+        if outdoor is not None:
+            outdoor.start()
 
         from .web import make_server
 
-        server = make_server(config, storage, collector)
+        server = make_server(config, storage, collector, outdoor)
         host = config.host if config.host not in ("0.0.0.0", "::") else "<toutes interfaces>"
         log.info("interface web disponible sur http://%s:%d/", host, server.server_address[1])
 
         def shutdown():
             collector.stop()
             retention.stop()
+            if outdoor is not None:
+                outdoor.stop()
             threading.Thread(target=server.shutdown, daemon=True).start()
 
         class _Stoppable:
@@ -277,6 +380,8 @@ def cmd_run(args: argparse.Namespace, config: Config) -> int:
             server.server_close()
             collector.stop()
             retention.stop()
+            if outdoor is not None:
+                outdoor.stop()
             collector_thread.join(timeout=5)
     return 0
 
