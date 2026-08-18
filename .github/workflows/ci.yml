@@ -71,6 +71,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
       # Tant que Python est la référence, toute dérive de son comportement doit
       # être délibérée : la capture rejouée doit reproduire les fichiers versionnés.
       - name: Rejouer la capture de référence
@@ -78,3 +82,14 @@ jobs:
 
       - name: Vérifier qu'elle n'a pas bougé
         run: git diff --exit-code -- tests/golden/expected
+
+      # Le critère d'acceptation du portage : la même liste de requêtes, rejouée
+      # contre l'implémentation .NET, doit produire des octets identiques.
+      - name: Publier le binaire .NET
+        run: dotnet publish src/Tempi/Tempi.csproj -c Release -o artifacts/dotnet
+
+      - name: Capturer le comportement .NET
+        run: TEMPI_CMD="$(command -v dotnet) $PWD/artifacts/dotnet/tempi.dll" ./scripts/golden-capture.sh --dotnet
+
+      - name: Comparer les deux implémentations
+        run: diff -r tests/golden/expected/api tests/golden/actual/api

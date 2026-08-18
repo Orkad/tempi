@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using Tempi.Configuration;
 using Tempi.Sensors;
 
 namespace Tempi.Storage;
@@ -434,9 +435,9 @@ public sealed class TempiStorage : IDisposable
 
             points.Add(new SeriesPoint(
                 reader.GetInt64(1),
-                Math.Round(reader.GetDouble(2), 4),
-                Math.Round(reader.GetDouble(3), 4),
-                Math.Round(reader.GetDouble(4), 4),
+                PythonRepr.Round(reader.GetDouble(2), 4),
+                PythonRepr.Round(reader.GetDouble(3), 4),
+                PythonRepr.Round(reader.GetDouble(4), 4),
                 reader.GetInt32(5)));
         }
 
@@ -475,9 +476,9 @@ public sealed class TempiStorage : IDisposable
         while (reader.Read())
         {
             result[reader.GetString(0)] = new SummaryStats(
-                Math.Round(reader.GetDouble(1), 4),
-                Math.Round(reader.GetDouble(2), 4),
-                Math.Round(reader.GetDouble(3), 4),
+                PythonRepr.Round(reader.GetDouble(1), 4),
+                PythonRepr.Round(reader.GetDouble(2), 4),
+                PythonRepr.Round(reader.GetDouble(3), 4),
                 reader.GetInt32(4));
         }
 

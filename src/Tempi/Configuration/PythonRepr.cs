@@ -16,6 +16,32 @@ namespace Tempi.Configuration;
 internal static class PythonRepr
 {
     /// <summary>
+    /// Reproduit <c>round()</c> de Python.
+    /// </summary>
+    /// <remarks>
+    /// <c>Math.Round(double, int)</c> ne convient pas : il met la valeur à l'échelle
+    /// avant d'arrondir, ce qui lui fait prendre pour un milieu exact une valeur qui
+    /// n'en est pas un. La moyenne 16,993749999999998 est arrondie à 16,9938 par
+    /// <c>Math.Round</c> alors que Python donne 16,9937 — et Python a raison, la valeur
+    /// est sous le milieu. Le formatage « F » de .NET arrondit correctement la valeur
+    /// binaire réelle depuis .NET Core 3.0 : formater puis relire reproduit donc la
+    /// sémantique de Python. Vérifié sur les cas limites, dont 0,12345 où
+    /// <c>Math.Round</c> se trompe aussi.
+    /// </remarks>
+    public static double Round(double value, int digits)
+    {
+        if (double.IsNaN(value) || double.IsInfinity(value))
+        {
+            return value;
+        }
+
+        return double.Parse(
+            value.ToString("F" + digits.ToString(CultureInfo.InvariantCulture), CultureInfo.InvariantCulture),
+            NumberStyles.Float,
+            CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Reproduit <c>str()</c> de Python pour un flottant.
     /// </summary>
     /// <remarks>
