@@ -85,11 +85,20 @@ jobs:
 
       # Le critère d'acceptation du portage : la même liste de requêtes, rejouée
       # contre l'implémentation .NET, doit produire des octets identiques.
-      - name: Publier le binaire .NET
-        run: dotnet publish src/Tempi/Tempi.csproj -c Release -o artifacts/dotnet
+      # Sortie hors du dépôt et forme longue des options : avec « -o » et un chemin
+      # relatif, le SDK 10.0.4xx réinjecte le projet par un fichier de réponse et
+      # MSBuild le reçoit deux fois (MSB1008).
+      # PublishTrimmed implique SelfContained : la capture porte donc sur un binaire
+      # trimmé, ce qui vérifie en prime que le trimming ne casse aucun endpoint —
+      # une rupture qui ne se manifesterait qu'à l'exécution, jamais à la compilation.
+      - name: Publier le binaire .NET (trimmé)
+        run: |
+          dotnet publish src/Tempi/Tempi.csproj \
+            --configuration Release \
+            --output "$RUNNER_TEMP/dotnet"
 
       - name: Capturer le comportement .NET
-        run: TEMPI_CMD="$(command -v dotnet) $PWD/artifacts/dotnet/tempi.dll" ./scripts/golden-capture.sh --dotnet
+        run: TEMPI_CMD="$(command -v dotnet) $RUNNER_TEMP/dotnet/tempi.dll" ./scripts/golden-capture.sh --dotnet
 
       - name: Comparer les deux implémentations
         run: diff -r tests/golden/expected/api tests/golden/actual/api
