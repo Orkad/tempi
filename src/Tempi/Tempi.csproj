@@ -4,6 +4,9 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>tempi</AssemblyName>
     <RootNamespace>Tempi</RootNamespace>
+    <!-- Requis par LibraryImport, la forme générée à la compilation (donc
+         compatible AOT) de l'appel à access(2) qui reproduit os.access. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- Le publish de production est self-contained et trimmé. Le RuntimeIdentifier
          n'est PAS figé ici : le préciser rendrait tout « dotnet build » local
