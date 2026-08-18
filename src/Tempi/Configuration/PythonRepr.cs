@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Tempi.Configuration;
@@ -14,6 +15,37 @@ namespace Tempi.Configuration;
 /// </remarks>
 internal static class PythonRepr
 {
+    /// <summary>
+    /// Reproduit <c>str()</c> de Python pour un flottant.
+    /// </summary>
+    /// <remarks>
+    /// Depuis Python 3.1, <c>str(float)</c> vaut <c>repr(float)</c> : la plus courte
+    /// représentation qui relit à l'identique, mais toujours avec un point décimal.
+    /// <c>str(200.0)</c> donne « 200.0 » là où <c>(200.0).ToString()</c> donne
+    /// « 200 ». La différence est visible dans le message « … °C hors de la plage du
+    /// capteur ».
+    /// </remarks>
+    public static string Number(double value)
+    {
+        if (double.IsNaN(value))
+        {
+            return "nan";
+        }
+
+        if (double.IsPositiveInfinity(value))
+        {
+            return "inf";
+        }
+
+        if (double.IsNegativeInfinity(value))
+        {
+            return "-inf";
+        }
+
+        var text = value.ToString("R", CultureInfo.InvariantCulture);
+        return text.AsSpan().IndexOfAny('.', 'E', 'e') >= 0 ? text : text + ".0";
+    }
+
     public static string Quote(string? value)
     {
         if (value is null)
