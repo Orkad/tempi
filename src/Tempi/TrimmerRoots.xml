@@ -1,0 +1,20 @@
+<!--
+  Racines préservées par le trimmer.
+
+  Kestrel cherche un certificat par défaut au démarrage, même quand il ne sert que
+  du HTTP en clair : KestrelConfigurationLoader.Reload() énumère un
+  X509Certificate2Collection. Rien ne référence ce chemin statiquement depuis le
+  code de tempi, le trimmer en supprime donc l'implémentation, et l'absence ne se
+  découvre qu'au démarrage du binaire publié.
+
+  Préserver le type entier plutôt que la seule méthode : l'énumération en touche
+  plusieurs, et cibler trop finement reviendrait à réécrire ce correctif au
+  prochain changement interne d'ASP.NET Core.
+-->
+<linker>
+  <assembly fullname="System.Security.Cryptography">
+    <type fullname="System.Security.Cryptography.X509Certificates.X509Certificate2Collection" preserve="all" />
+    <type fullname="System.Security.Cryptography.X509Certificates.X509Certificate2" preserve="all" />
+    <type fullname="System.Security.Cryptography.X509Certificates.X509Store" preserve="all" />
+  </assembly>
+</linker>
