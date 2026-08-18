@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Tempi.Tests/Tempi.Tests.csproj" />
+  <Project Path="Tempi/Tempi.csproj" />
+</Solution>

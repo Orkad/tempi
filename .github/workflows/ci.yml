@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restaurer
+        run: dotnet restore src/Tempi.slnx
+
+      - name: Compiler
+        run: dotnet build src/Tempi.slnx --no-restore --configuration Release
+
+      # Le SDK 10 a retiré VSTest : le runner est choisi dans global.json et le
+      # fichier de solution se passe par --solution.
+      - name: Tester
+        run: dotnet test --solution src/Tempi.slnx --configuration Release --no-build
+
+      # La compilation croisée vers arm64 est la cible réelle du projet. La vérifier
+      # à chaque commit évite de découvrir un problème de trimming au moment de
+      # publier une release.
+      - name: Vérifier la publication arm64
+        run: |
+          dotnet publish src/Tempi/Tempi.csproj \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained \
+            -p:PublishTrimmed=true \
+            --output "$RUNNER_TEMP/arm64"
+          ls -la "$RUNNER_TEMP/arm64/tempi"
+
+  python:
+    name: Python (référence)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # « discover -s tests -t . » ne fonctionne plus depuis Python 3.11, qui a
+      # retiré la prise en charge des paquets-espaces de noms : tests/ n'a pas
+      # d'__init__.py. On prend donc tests/ comme racine et on ajoute le dépôt au
+      # chemin d'import.
+      - name: Tests unitaires
+        run: PYTHONPATH=. python3 -m unittest discover -s tests -t tests -v
+
+  golden:
+    name: Golden master
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Tant que Python est la référence, toute dérive de son comportement doit
+      # être délibérée : la capture rejouée doit reproduire les fichiers versionnés.
+      - name: Rejouer la capture de référence
+        run: ./scripts/golden-capture.sh --python
+
+      - name: Vérifier qu'elle n'a pas bougé
+        run: git diff --exit-code -- tests/golden/expected

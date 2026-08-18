@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Pas d'analyseurs de trim ici : ils remonteraient du projet référencé et
+         transformeraient chaque avertissement en bruit sur du code de test. -->
+    <IsAotCompatible>false</IsAotCompatible>
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!-- xunit.v3 s'exécute sur Microsoft.Testing.Platform ; le SDK 10 a retiré
+         VSTest, il faut donc demander explicitement le nouveau « dotnet test ». -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Tempi/Tempi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

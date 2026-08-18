@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>tempi</AssemblyName>
+    <RootNamespace>Tempi</RootNamespace>
+
+    <!-- Le publish de production est self-contained et trimmé. Le RuntimeIdentifier
+         n'est PAS figé ici : le préciser rendrait tout « dotnet build » local
+         dépendant du runtime pack arm64. Il est passé en ligne de commande. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <InvariantTimezone>false</InvariantTimezone>
+
+    <!-- Active les quatre analyseurs (trim, AOT, fichier unique, compatibilité).
+         On ne publie pas encore en NativeAOT, mais coder sous ces contraintes dès
+         maintenant ne coûte rien et garde la porte ouverte. -->
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <!-- Le générateur de délégués de requête doit être activé dans le projet qui
+         contient les MapGet/MapPost, sinon la liaison de paramètres reste
+         réflexive et le trimming casse les endpoints à l'exécution seulement. -->
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+
+    <!-- Volontairement laissé à false : tempi remonte les messages d'exception du
+         framework dans {"error": ...} et dans les remèdes de « doctor ». Les
+         remplacer par des clés brutes ferait gagner ~1 Mo et perdre le diagnostic. -->
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
+
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pendant la cohabitation, l'interface reste le fichier Python : une seule
+         source de vérité, aucune copie à resynchroniser. Le chemin devient
+         wwwroot/index.html au commit qui retire le Python. -->
+    <EmbeddedResource Include="../../tempi/static/index.html" LogicalName="tempi.index.html" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tempi.Tests" />
+  </ItemGroup>
+
+</Project>
