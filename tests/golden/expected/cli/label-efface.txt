@@ -1,0 +1,6 @@
+$ tempi label 28-000005e2fdc3
+--- code de retour ---
+0
+--- stdout ---
+Nom effacé pour 28-000005e2fdc3
+--- stderr ---

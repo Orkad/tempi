@@ -1,0 +1,6 @@
+$ tempi prune
+--- code de retour ---
+2
+--- stdout ---
+--- stderr ---
+Aucune rétention configurée : précisez --retention-days ou TEMPI_RETENTION_DAYS.
