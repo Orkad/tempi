@@ -180,8 +180,17 @@ SRV=""
 
 # Retire d'une sortie ce qui varie d'une exécution à l'autre : chemins temporaires
 # et horodatage des lignes de journal (format « %Y-%m-%dT%H:%M:%S » en tête de ligne).
+#
+# Le bloc d'usage d'argparse est également retiré. C'est une divergence assumée : le
+# reproduire en C# reviendrait à coder en dur la mise en forme d'argparse — un
+# littéral déguisé en sortie générée, qui se périmerait au premier ajout de
+# sous-commande. Le contrat conservé est celui qui compte pour qui scripte la
+# commande : le code de retour et la ligne « tempi: error: … ». La suppression ne
+# s'applique qu'entre « usage: tempi » et cette ligne, pour ne pas toucher aux
+# sorties indentées légitimes comme celle de « stats ».
 scrub() {
-    sed -E "s#$2#<db>#g; s#$WORK#<tmp>#g; s#^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}#<ts>#" "$1"
+    sed -E "s#$2#<db>#g; s#$WORK#<tmp>#g; s#^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}#<ts>#" "$1" \
+        | awk '/^usage: tempi/ { skip = 1 } /^tempi: error:/ { skip = 0 } !skip'
 }
 
 run_cli() {

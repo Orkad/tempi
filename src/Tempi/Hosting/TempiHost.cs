@@ -57,11 +57,7 @@ public static class TempiHost
 
         if (withCollector)
         {
-            builder.Services.AddSingleton(sp => new Collector(
-                config,
-                sp.GetRequiredService<TempiStorage>(),
-                time: sp.GetRequiredService<TimeProvider>(),
-                log: TempiLog.For(sp.GetService<ILoggerFactory>(), TempiLog.Collector)));
+            AddCollection(builder.Services, config, time, null);
         }
 
         builder.WebHost.ConfigureKestrel(kestrel => kestrel.AddServerHeader = false);
@@ -71,6 +67,74 @@ public static class TempiHost
         app.Use(TempiEndpoints.Middleware);
         TempiEndpoints.Map(app);
         return app;
+    }
+
+    /// <summary>Construit l'hôte de « collect » : les mêmes services, sans serveur web.</summary>
+    public static IHost BuildCollector(
+        TempiConfig config,
+        int? maxCycles,
+        bool verbose = false,
+        TimeProvider? time = null)
+    {
+        // DisableDefaults écarte appsettings.json, les variables DOTNET_*/ASPNETCORE_*
+        // et le cycle de vie console par défaut : autant de sources de comportement
+        // que la configuration de tempi ne contrôle pas.
+        var builder = Host.CreateApplicationBuilder(
+            new HostApplicationBuilderSettings { DisableDefaults = true });
+
+        ConfigureLogging(builder.Logging, verbose);
+        builder.Services.AddSystemd();
+        builder.Services.AddSingleton(config);
+        builder.Services.AddSingleton(time ?? TimeProvider.System);
+        builder.Services.AddSingleton(new TempiStorage(config.DbPath, time));
+
+        AddCollection(builder.Services, config, time, maxCycles);
+        return builder.Build();
+    }
+
+    /// <summary>Enregistre la collecte, la rétention et la source extérieure.</summary>
+    private static void AddCollection(
+        IServiceCollection services,
+        TempiConfig config,
+        TimeProvider? time,
+        int? maxCycles)
+    {
+        services.AddSingleton(sp => new Collector(
+            config,
+            sp.GetRequiredService<TempiStorage>(),
+            time: sp.GetRequiredService<TimeProvider>(),
+            log: TempiLog.For(sp.GetService<ILoggerFactory>(), TempiLog.Collector)));
+
+        services.AddHostedService(sp => new CollectorService(
+            sp.GetRequiredService<Collector>(),
+            sp.GetRequiredService<IHostApplicationLifetime>(),
+            maxCycles));
+
+        services.AddHostedService(sp => new RetentionService(
+            config,
+            sp.GetRequiredService<TempiStorage>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetService<ILoggerFactory>()));
+
+        // La source extérieure est facultative : sans fournisseur, aucun service n'est
+        // enregistré et aucune requête réseau n'est émise.
+        var probe = OutdoorSources.Create(config, time);
+        if (probe is null)
+        {
+            return;
+        }
+
+        services.AddSingleton(sp => OutdoorFactory.TryCreate(
+            config,
+            sp.GetRequiredService<TempiStorage>(),
+            time: sp.GetRequiredService<TimeProvider>(),
+            log: TempiLog.For(sp.GetService<ILoggerFactory>(), TempiLog.Outdoor))!);
+
+        services.AddHostedService(sp => new OutdoorService(
+            config,
+            sp.GetRequiredService<OutdoorPoller>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetService<ILoggerFactory>()));
     }
 
     /// <summary>
@@ -106,6 +170,6 @@ public static class TempiHost
         });
 
         logging.SetMinimumLevel(verbose ? LogLevel.Debug : LogLevel.Information);
-        logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+        logging.AddFilter("Microsoft", LogLevel.Warning);
     }
 }

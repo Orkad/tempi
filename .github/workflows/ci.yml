@@ -100,8 +100,13 @@ jobs:
       - name: Capturer le comportement .NET
         run: TEMPI_CMD="$(command -v dotnet) $RUNNER_TEMP/dotnet/tempi.dll" ./scripts/golden-capture.sh --dotnet
 
+      # Les deux corpus : les réponses HTTP et les sorties de la ligne de commande,
+      # codes de retour compris. Le dossier machine/ en est exclu — « doctor »
+      # interroge l'hôte, sa sortie n'a de sens qu'entre deux exécutions locales.
       - name: Comparer les deux implémentations
-        run: diff -r tests/golden/expected/api tests/golden/actual/api
+        run: |
+          diff -r tests/golden/expected/api tests/golden/actual/api
+          diff -r tests/golden/expected/cli tests/golden/actual/cli
 
       # Le trimming ne casse rien à la compilation : il supprime du code que
       # personne ne référence statiquement, et l'absence ne se découvre qu'à

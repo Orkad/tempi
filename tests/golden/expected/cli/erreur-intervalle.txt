@@ -3,7 +3,4 @@ $ tempi collect --interval 0
 2
 --- stdout ---
 --- stderr ---
-usage: tempi [-h] [--version] [--db DB] [--w1-dir W1_DIR] [--simulate] [-v]
-             {sensors,read,collect,serve,run,outdoor,export,prune,label,stats,doctor}
-             ...
 tempi: error: l'intervalle de collecte doit valoir au moins 1 seconde
