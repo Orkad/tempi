@@ -108,11 +108,10 @@ jobs:
       # l'exécution. Kestrel cherche un certificat par défaut au démarrage, même en
       # HTTP pur, et ce chemin passe par X509Certificate2Collection.
       #
-      # Cette étape est en échec connu : elle documente le problème à l'endroit où
-      # il se voit, plutôt que de le laisser surgir au moment de publier une release.
-      # Elle sera rendue bloquante avec le travail de packaging.
-      - name: Démarrage du binaire trimmé (échec connu)
-        continue-on-error: true
+      # Construire ne suffit pas : il faut démarrer le binaire et l'interroger.
+      # C'est ainsi que la suppression de X509Certificate2Collection.GetEnumerator a
+      # été découverte, et c'est ce qui empêchera la prochaine de passer inaperçue.
+      - name: Démarrage du binaire trimmé
         run: |
           dotnet publish src/Tempi/Tempi.csproj \
             --configuration Release \
