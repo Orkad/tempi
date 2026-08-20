@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  arm64:
+    name: Artefact linux-arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Le RID et --self-contained sont nommés explicitement : PublishTrimmed les
+      # implique, mais sans les nommer le SDK réinvoque MSBuild par un fichier de
+      # réponse et lui passe le projet deux fois.
+      - name: Publier
+        run: |
+          dotnet publish src/Tempi/Tempi.csproj \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained \
+            -p:PublishTrimmed=true \
+            -p:Version="${GITHUB_REF_NAME#v}" \
+            --output out
+          file out/tempi
+
+      # Garde-fou : l'artefact ne doit pas annoncer une version différente de son
+      # tag. La version exposée par « --version » et par /api/health est une
+      # constante du code — délibérément, pour que la CI n'y injecte pas le sha —
+      # donc rien ne la synchronise automatiquement avec le tag.
+      - name: Vérifier la concordance version / tag
+        run: |
+          declared=$(grep -oP 'Value = "\K[^"]+' src/Tempi/TempiVersion.cs)
+          expected="${GITHUB_REF_NAME#v}"
+          if [ "$declared" != "$expected" ]; then
+            echo "TempiVersion.Value vaut $declared, le tag annonce $expected." >&2
+            echo "Alignez src/Tempi/TempiVersion.cs avant de publier." >&2
+            exit 1
+          fi
+
+      - name: Empaqueter
+        run: |
+          tar -C out -czf "tempi-${GITHUB_REF_NAME}-linux-arm64.tar.gz" .
+          sha256sum tempi-*.tar.gz > SHA256SUMS
+          ls -la tempi-*.tar.gz SHA256SUMS
+
+      # Le binaire est arm64 et le runner x64 : son démarrage ne peut pas être
+      # vérifié ici. C'est le job « Golden master » de la CI qui couvre ce risque,
+      # en démarrant l'équivalent x64 trimmé — le trimming se comporte de la même
+      # façon sur les deux architectures. Le premier démarrage réel reste celui du
+      # Raspberry Pi.
+      - name: Attacher à la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" tempi-*.tar.gz SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              tempi-*.tar.gz SHA256SUMS
+          fi
