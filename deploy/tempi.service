@@ -5,7 +5,9 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=exec
+# notify : le service n'est annoncé actif qu'une fois Kestrel à l'écoute et la
+# collecte démarrée. L'annonce est faite par AddSystemd() côté application.
+Type=notify
 User=tempi
 Group=tempi
 
@@ -16,7 +18,7 @@ Environment=TEMPI_DB=/var/lib/tempi/tempi.db
 # Le tiret initial rend le fichier facultatif : le service démarre même sans lui.
 EnvironmentFile=-/etc/tempi/tempi.env
 
-ExecStart=/opt/tempi/venv/bin/tempi run
+ExecStart=/opt/tempi/bin/tempi run
 Restart=on-failure
 RestartSec=5s
 
@@ -29,11 +31,23 @@ ProtectHome=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# AF_NETLINK est nécessaire à getaddrinfo de la glibc, donc à la résolution de
+# noms — et donc à la source de température extérieure. L'ancienne unité ne
+# l'autorisait pas : le service tournait tant que TEMPI_OUTDOOR_PROVIDER restait
+# vide, ce qui était le cas par défaut.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
 RestrictNamespaces=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=yes
+
+# Le compilateur à la volée de .NET a besoin de pages mémoire à la fois
+# inscriptibles et exécutables : avec MemoryDenyWriteExecute=yes, le service ne
+# démarre pas. La directive redeviendrait possible en compilation native
+# anticipée, où plus aucun code n'est généré à l'exécution.
+MemoryDenyWriteExecute=no
+
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 
