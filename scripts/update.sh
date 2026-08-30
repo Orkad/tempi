@@ -9,12 +9,19 @@
 #
 # À lancer SANS sudo : le script appelle sudo lui-même pour la partie qui en a
 # besoin. Il ne touche ni à la base de mesures ni à /etc/tempi/tempi.env.
+#
+# Le dépôt étant privé, la comparaison de version demande un jeton GitHub. Le
+# plus simple est de le déposer dans ~/.config/tempi/github-token : c'est le même
+# fichier que celui qu'install.sh lira ensuite sous sudo.
 
 set -euo pipefail
 
-REPO=Orkad/tempi
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN=/opt/tempi/bin/tempi
+
+# shellcheck source=scripts/_github.sh
+. "$(dirname "${BASH_SOURCE[0]}")/_github.sh"
+GH_TOKEN_VALUE="$(github_token)"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m/!\\\033[0m %s\n' "$*" >&2; }
@@ -33,6 +40,17 @@ for arg in "$@"; do
 done
 
 [[ $EUID -ne 0 ]] || die "lancez ce script sans sudo (voir l'en-tête du fichier)."
+
+# sudo repart d'un environnement vide : un jeton donné par l'environnement doit
+# être transmis explicitement, sans passer par la ligne de commande où « ps » le
+# rendrait visible. Un jeton déposé dans un fichier n'a besoin de rien : install.sh
+# le relit lui-même, dans le dossier de l'utilisateur qui a appelé sudo.
+run_install() {
+    if [[ -n ${GITHUB_TOKEN:-} ]]; then
+        exec sudo --preserve-env=GITHUB_TOKEN "$REPO_DIR/scripts/install.sh" "$@"
+    fi
+    exec sudo "$REPO_DIR/scripts/install.sh" "$@"
+}
 
 # --- Version installée ------------------------------------------------------
 
@@ -59,17 +77,18 @@ info "Version installée : $installed"
 if [[ -n $REQUESTED && -f $REQUESTED ]]; then
     info "Artefact local : $REQUESTED"
     info "Installation."
-    exec sudo "$REPO_DIR/scripts/install.sh" "$REQUESTED"
+    run_install "$REQUESTED"
 fi
 
 target="$REQUESTED"
 if [[ -z $target ]]; then
     command -v curl >/dev/null || die "curl est requis pour interroger les releases."
+    [[ -n $GH_TOKEN_VALUE ]] \
+        || die "aucun jeton GitHub trouvé : déposez-en un dans ~/.config/tempi/github-token (le dépôt est privé)."
     info "Recherche de la dernière version publiée."
-    target="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-              | grep -oE '"tag_name": *"[^"]+"' | head -1 | grep -oE '"[^"]+"$' | tr -d '"')" \
-        || die "impossible d'interroger les releases de $REPO."
-    [[ -n $target ]] || die "aucune version publiée trouvée pour $REPO."
+    target="$(gh_json_string "$(gh_release_json "")" tag_name)" \
+        || die "impossible d'interroger les releases de $TEMPI_REPO."
+    [[ -n $target ]] || die "aucune version publiée trouvée pour $TEMPI_REPO."
 fi
 
 # Le tag porte un « v », la sortie de « tempi --version » non.
@@ -88,4 +107,4 @@ fi
 
 # install.sh fait le reste : téléchargement, vérification de l'empreinte,
 # remplacement atomique du binaire et redémarrage du service.
-exec sudo "$REPO_DIR/scripts/install.sh" "$target"
+run_install "$target"

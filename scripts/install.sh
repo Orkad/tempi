@@ -6,6 +6,10 @@
 #   sudo ./scripts/install.sh v1.2.0           # une version précise
 #   sudo ./scripts/install.sh ./tempi.tar.gz   # artefact local, sans réseau
 #
+# Le dépôt étant privé, le téléchargement demande un jeton GitHub : dans
+# GITHUB_TOKEN, dans ~/.config/tempi/github-token ou dans /etc/tempi/github-token
+# (voir scripts/_github.sh). L'artefact local, lui, n'en a pas besoin.
+#
 # Le script est idempotent : on peut le relancer pour mettre à jour. La base de
 # mesures et /etc/tempi/tempi.env ne sont jamais touchés.
 
@@ -17,9 +21,12 @@ BIN_LINK=/usr/local/bin/tempi
 CONFIG_DIR=/etc/tempi
 SERVICE=tempi.service
 USER_NAME=tempi
-REPO=Orkad/tempi
 RID=linux-arm64
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck source=scripts/_github.sh
+. "$(dirname "${BASH_SOURCE[0]}")/_github.sh"
+GH_TOKEN_VALUE="$(github_token)"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m/!\\\033[0m %s\n' "$*" >&2; }
@@ -87,29 +94,39 @@ resolve_artifact() {
     # propriété qu'avait l'ancienne installation par pip, qui ne demandait aucun
     # accès réseau puisque le paquet n'avait aucune dépendance.
     if [[ -n $requested && -f $requested ]]; then
-        info "Artefact local : $requested"
+        info "Artefact local : $requested" >&2
         printf '%s' "$requested"
         return 0
     fi
 
     command -v curl >/dev/null || die "curl est requis pour télécharger une release."
 
-    local tag="$requested"
-    if [[ -z $tag ]]; then
-        info "Recherche de la dernière version publiée." >&2
-        tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-               | grep -oE '"tag_name": *"[^"]+"' | head -1 | grep -oE '"[^"]+"$' | tr -d '"')" \
-            || die "impossible d'interroger les releases de $REPO."
-        [[ -n $tag ]] || die "aucune version publiée trouvée pour $REPO."
+    if [[ -z $GH_TOKEN_VALUE ]]; then
+        warn "Aucun jeton GitHub trouvé : le dépôt étant privé, l'API répondra 404."
+        warn "Déposez-en un dans /etc/tempi/github-token, ou passez un artefact local en argument."
     fi
 
+    if [[ -n $requested ]]; then
+        info "Version demandée : $requested" >&2
+    else
+        info "Recherche de la dernière version publiée." >&2
+    fi
+
+    local release
+    release="$(gh_release_json "$requested")" \
+        || die "impossible d'interroger les releases de $TEMPI_REPO (jeton absent, invalide, ou version inexistante)."
+
+    local tag assets_url
+    tag="$(gh_json_string "$release" tag_name)"
+    assets_url="$(gh_json_string "$release" assets_url)"
+    [[ -n $tag && -n $assets_url ]] || die "réponse inattendue de l'API GitHub."
+
     local name="tempi-$tag-$RID.tar.gz"
-    local base="https://github.com/$REPO/releases/download/$tag"
 
     info "Téléchargement de $name." >&2
-    curl -fsSL -o "$WORK/$name" "$base/$name" \
-        || die "téléchargement de $name impossible (la version $tag existe-t-elle ?)."
-    curl -fsSL -o "$WORK/SHA256SUMS" "$base/SHA256SUMS" \
+    gh_download_asset "$assets_url" "$name" "$WORK/$name" \
+        || die "$name est absent de la release $tag."
+    gh_download_asset "$assets_url" SHA256SUMS "$WORK/SHA256SUMS" \
         || die "empreintes introuvables pour $tag."
 
     if command -v sha256sum >/dev/null; then

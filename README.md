@@ -81,6 +81,21 @@ Cela exclut les Pi 1, Zero et Zero W, dont le processeur ARMv6 n'est pas pris en
 charge par .NET, ainsi qu'un système 32 bits installé sur un Pi qui, lui, le
 serait — le script le signale avant de télécharger quoi que ce soit.
 
+Le dépôt est privé : le téléchargement de la release demande donc un jeton
+GitHub en lecture. Un jeton à portée fine avec **Contents : read** sur ce dépôt
+suffit — ou un jeton classique de portée `repo`. Déposez-le une fois pour toutes :
+
+```bash
+mkdir -p ~/.config/tempi
+printf '%s\n' 'github_pat_…' > ~/.config/tempi/github-token
+chmod 600 ~/.config/tempi/github-token
+```
+
+`install.sh` le relit sous `sudo` dans le dossier de l'utilisateur qui l'a appelé,
+et `update.sh` s'en sert aussi. Deux autres emplacements sont acceptés : la
+variable `GITHUB_TOKEN`, et `/etc/tempi/github-token` pour une machine sans
+utilisateur derrière. Une installation depuis un artefact local n'en demande aucun.
+
 ```bash
 git clone https://github.com/Orkad/tempi.git ~/tempi
 cd ~/tempi

@@ -48,8 +48,10 @@ fi
 
 # La commande à exercer. Surchargeable pour pointer un binaire publié.
 if [[ $IMPL == python ]]; then
+    # shellcheck disable=SC2206  # le découpage en mots est voulu : TEMPI_CMD porte une commande
     TEMPI_BIN=(${TEMPI_CMD:-python3 -m tempi})
 else
+    # shellcheck disable=SC2206
     TEMPI_BIN=(${TEMPI_CMD:-$ROOT/artifacts/tempi})
     [[ -x ${TEMPI_BIN[0]} ]] || { echo "binaire .NET introuvable : ${TEMPI_BIN[0]}" >&2; exit 2; }
 fi

@@ -61,6 +61,18 @@ jobs:
       - name: Tests unitaires
         run: PYTHONPATH=. python3 -m unittest discover -s tests -t tests -v
 
+  scripts:
+    name: Scripts de déploiement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Les scripts d'installation ne s'exécutent nulle part en intégration
+      # continue : ils demandent systemd, du matériel 1-Wire et une release à
+      # télécharger. L'analyse statique est le seul filet qui reste.
+      - name: Analyse statique
+        run: shellcheck -x -s bash --severity=warning scripts/*.sh
+
   golden:
     name: Golden master
     runs-on: ubuntu-latest
