@@ -8,7 +8,12 @@
 #   1. la variable d'environnement GITHUB_TOKEN ;
 #   2. ~/.config/tempi/github-token — celui de l'utilisateur qui a appelé sudo,
 #      pas celui de root, pour que les deux scripts trouvent le même fichier ;
-#   3. /etc/tempi/github-token, pour une installation sans utilisateur derrière.
+#   3. /etc/tempi/github-token, pour une installation sans utilisateur derrière ;
+#   4. celui que git conserve déjà pour github.com.
+#
+# Le quatrième cas est le cas normal sur le Raspberry Pi : cloner un dépôt privé
+# demande déjà un jeton, et celui-là a exactement la portée qu'il faut ici. Il
+# n'y a donc rien à installer de plus.
 #
 # Aucun jeton n'est une situation valide : les appels restent anonymes, ce qui
 # suffirait si le dépôt devenait public.
@@ -39,6 +44,16 @@ github_token() {
             return 0
         fi
     done
+
+    # Le jeton que git garde pour github.com — celui du clonage. GIT_TERMINAL_PROMPT
+    # et GIT_ASKPASS coupent toute interaction : sans identifiant enregistré, git
+    # doit échouer, pas poser une question au milieu d'un script lancé par sudo.
+    command -v git >/dev/null || return 0
+    local answer
+    answer="$(printf 'protocol=https\nhost=github.com\n\n' \
+        | HOME="$home" GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true \
+          git credential fill 2>/dev/null)" || return 0
+    printf '%s' "$answer" | sed -n 's/^password=//p' | head -1
 }
 
 # gh_curl <type accepté> <url> [arguments curl…]

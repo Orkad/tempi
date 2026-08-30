@@ -6,9 +6,9 @@
 #   sudo ./scripts/install.sh v1.2.0           # une version précise
 #   sudo ./scripts/install.sh ./tempi.tar.gz   # artefact local, sans réseau
 #
-# Le dépôt étant privé, le téléchargement demande un jeton GitHub : dans
-# GITHUB_TOKEN, dans ~/.config/tempi/github-token ou dans /etc/tempi/github-token
-# (voir scripts/_github.sh). L'artefact local, lui, n'en a pas besoin.
+# Le dépôt étant privé, le téléchargement demande un jeton GitHub. Celui qui sert
+# au clonage est réutilisé tel quel ; à défaut, voir scripts/_github.sh. L'artefact
+# local, lui, n'en demande aucun.
 #
 # Le script est idempotent : on peut le relancer pour mettre à jour. La base de
 # mesures et /etc/tempi/tempi.env ne sont jamais touchés.
@@ -103,7 +103,8 @@ resolve_artifact() {
 
     if [[ -z $GH_TOKEN_VALUE ]]; then
         warn "Aucun jeton GitHub trouvé : le dépôt étant privé, l'API répondra 404."
-        warn "Déposez-en un dans /etc/tempi/github-token, ou passez un artefact local en argument."
+        warn "Si le dépôt a été cloné en HTTPS avec « credential.helper store », le jeton"
+        warn "du clonage suffit. Sinon : /etc/tempi/github-token, ou un artefact local en argument."
     fi
 
     if [[ -n $requested ]]; then
