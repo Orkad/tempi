@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Capture le comportement observable de tempi dans des fichiers de référence,
-# pour comparer l'implémentation Python et l'implémentation .NET.
+# Capture le comportement observable de tempi dans des fichiers de référence.
+# Les fichiers versionnés sous tests/golden/expected/ ont été produits par
+# l'implémentation Python d'origine : les rejouer, c'est vérifier qu'aucun
+# changement n'a déplacé un octet de l'API ou de la ligne de commande.
 #
-#   scripts/golden-capture.sh --python           # -> tests/golden/expected/
-#   scripts/golden-capture.sh --dotnet           # -> tests/golden/actual/
-#   scripts/golden-capture.sh --python --out /tmp/x
+#   scripts/golden-capture.sh                    # -> tests/golden/actual/
+#   scripts/golden-capture.sh --out /tmp/x
 #
 # Les réponses sont normalisées : tout ce qui dépend de l'instant ou de la machine
 # (« now », chemin et taille de la base) est remplacé par un jeton. Aucune requête
@@ -26,35 +27,24 @@ PORT="${TEMPI_GOLDEN_PORT:-18471}"
 FROM=1767225600
 TO=1767398400
 
-IMPL=""
 OUT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --python) IMPL=python ;;
-        --dotnet) IMPL=dotnet ;;
+        --dotnet) ;;   # accepté par compatibilité, il n'y a plus qu'une implémentation
         --out)    OUT="$2"; shift ;;
         *) echo "option inconnue : $1" >&2; exit 2 ;;
     esac
     shift
 done
 
-[[ -n $IMPL ]] || { echo "précisez --python ou --dotnet" >&2; exit 2; }
 [[ -f $REFERENCE ]] || { echo "base de référence absente : $REFERENCE" >&2; exit 2; }
-
-if [[ -z $OUT ]]; then
-    [[ $IMPL == python ]] && OUT="$ROOT/tests/golden/expected" || OUT="$ROOT/tests/golden/actual"
-fi
+[[ -n $OUT ]] || OUT="$ROOT/tests/golden/actual"
 
 # La commande à exercer. Surchargeable pour pointer un binaire publié.
-if [[ $IMPL == python ]]; then
-    # shellcheck disable=SC2206  # le découpage en mots est voulu : TEMPI_CMD porte une commande
-    TEMPI_BIN=(${TEMPI_CMD:-python3 -m tempi})
-else
-    # shellcheck disable=SC2206
-    TEMPI_BIN=(${TEMPI_CMD:-$ROOT/artifacts/tempi})
-    [[ -x ${TEMPI_BIN[0]} ]] || { echo "binaire .NET introuvable : ${TEMPI_BIN[0]}" >&2; exit 2; }
-fi
+# shellcheck disable=SC2206  # le découpage en mots est voulu : TEMPI_CMD porte une commande
+TEMPI_BIN=(${TEMPI_CMD:-$ROOT/artifacts/tempi})
+[[ -x ${TEMPI_BIN[0]} ]] || { echo "binaire introuvable : ${TEMPI_BIN[0]}" >&2; exit 2; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"; [[ -n ${SRV:-} ]] && kill "$SRV" 2>/dev/null || true' EXIT
@@ -243,4 +233,4 @@ run_cli_machine() {
 run_cli_machine doctor-json doctor --json
 run_cli_machine doctor-texte doctor
 
-echo "capture $IMPL écrite dans $OUT"
+echo "capture écrite dans $OUT"

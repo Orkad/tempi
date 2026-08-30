@@ -44,23 +44,6 @@ jobs:
             --output "$RUNNER_TEMP/arm64"
           ls -la "$RUNNER_TEMP/arm64/tempi"
 
-  python:
-    name: Python (référence)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # « discover -s tests -t . » ne fonctionne plus depuis Python 3.11, qui a
-      # retiré la prise en charge des paquets-espaces de noms : tests/ n'a pas
-      # d'__init__.py. On prend donc tests/ comme racine et on ajoute le dépôt au
-      # chemin d'import.
-      - name: Tests unitaires
-        run: PYTHONPATH=. python3 -m unittest discover -s tests -t tests -v
-
   scripts:
     name: Scripts de déploiement
     runs-on: ubuntu-latest
@@ -79,25 +62,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
 
-      # Tant que Python est la référence, toute dérive de son comportement doit
-      # être délibérée : la capture rejouée doit reproduire les fichiers versionnés.
-      - name: Rejouer la capture de référence
-        run: ./scripts/golden-capture.sh --python
-
-      - name: Vérifier qu'elle n'a pas bougé
-        run: git diff --exit-code -- tests/golden/expected
-
-      # Le critère d'acceptation du portage : la même liste de requêtes, rejouée
-      # contre l'implémentation .NET, doit produire des octets identiques.
-      # Publication non trimmée : cette étape répond à « le portage est-il fidèle ? »,
+      # Les fichiers de tests/golden/expected/ ont été produits par l'implémentation
+      # Python d'origine. Les rejouer vérifie qu'aucun changement n'a déplacé un
+      # octet de l'API ou de la ligne de commande.
+      # Publication non trimmée : cette étape répond à « le comportement est-il
+      # intact ? »,
       # pas à « le trimming tient-il ? ». Les deux questions méritent une réponse,
       # mais les confondre empêche de savoir laquelle a échoué. La seconde est
       # traitée par l'étape « Démarrage du binaire trimmé » ci-dessous.
@@ -109,13 +82,13 @@ jobs:
             -p:SelfContained=false \
             --output "$RUNNER_TEMP/dotnet"
 
-      - name: Capturer le comportement .NET
-        run: TEMPI_CMD="$(command -v dotnet) $RUNNER_TEMP/dotnet/tempi.dll" ./scripts/golden-capture.sh --dotnet
+      - name: Capturer le comportement
+        run: TEMPI_CMD="$(command -v dotnet) $RUNNER_TEMP/dotnet/tempi.dll" ./scripts/golden-capture.sh
 
       # Les deux corpus : les réponses HTTP et les sorties de la ligne de commande,
       # codes de retour compris. Le dossier machine/ en est exclu — « doctor »
       # interroge l'hôte, sa sortie n'a de sens qu'entre deux exécutions locales.
-      - name: Comparer les deux implémentations
+      - name: Comparer à la référence
         run: |
           diff -r tests/golden/expected/api tests/golden/actual/api
           diff -r tests/golden/expected/cli tests/golden/actual/cli

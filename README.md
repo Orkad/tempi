@@ -423,7 +423,7 @@ Organisation du code :
 | `src/Tempi/Cli/` | ligne de commande, sondes système du `doctor` |
 | `src/Tempi/Hosting/` | hôtes de `run`, `serve` et `collect`, intégration systemd |
 | `src/Tempi/Configuration/` | variables d'environnement, validation, chemins par défaut |
-| `tempi/static/index.html` | interface web (HTML, CSS et JavaScript sans dépendance), embarquée dans le binaire |
+| `src/Tempi/wwwroot/index.html` | interface web (HTML, CSS et JavaScript sans dépendance), embarquée dans le binaire |
 
 ### Publication
 
@@ -439,25 +439,28 @@ compilation : la régression n'apparaît qu'à l'exécution, et sans avertisseme
 C'est pourquoi l'intégration continue **démarre** le binaire trimmé et
 l'interroge, au lieu de se contenter de le construire.
 
-### Conformité avec l'implémentation Python
+### Comportement observable
 
-tempi était écrit en Python jusqu'à la version 1.0.0. Cette implémentation reste
-dans le dépôt le temps de la migration, comme référence exécutable :
-`scripts/golden-capture.sh` rejoue la même liste de requêtes HTTP et
-d'invocations de la ligne de commande contre l'une ou l'autre, normalise ce qui
-varie d'une exécution à l'autre, et les sorties sont comparées octet par octet.
+tempi était écrit en Python jusqu'à la version 1.0.0. Le portage en .NET s'est
+fait sous la contrainte de ne rien déplacer de ce qui se voit du dehors : le
+fichier SQLite, l'API JSON et la ligne de commande. Les fichiers de
+`tests/golden/expected/` ont été capturés sur cette implémentation d'origine, et
+ils restent le contrat.
 
 ```bash
-scripts/golden-capture.sh --python
-scripts/golden-capture.sh --dotnet
-git diff --exit-code tests/golden/    # doit être vide
-
-PYTHONPATH=. python3 -m unittest discover -s tests -t tests   # 145 tests
+scripts/golden-capture.sh
+diff -r tests/golden/expected/api tests/golden/actual/api
+diff -r tests/golden/expected/cli tests/golden/actual/cli
 ```
 
-`tests/golden/reference.db` est une base figée et versionnée. Le capteur simulé
-de Python tire ses valeurs du Mersenne Twister, qu'on ne sait pas reproduire en
-.NET : la référence doit donc être une donnée, pas un calcul.
+Le script rejoue une liste fixe de requêtes HTTP et d'invocations de la ligne de
+commande contre `artifacts/tempi` — surchargeable par `TEMPI_CMD` — normalise ce
+qui varie d'une exécution à l'autre, et les sorties se comparent octet par octet.
+L'intégration continue le fait à chaque commit.
+
+`tests/golden/reference.db` est une base de mesures figée et versionnée, et non
+un jeu de données régénéré : le capteur simulé de Python tirait ses valeurs du
+Mersenne Twister, qu'aucune autre plateforme ne reproduit.
 
 ## Licence
 

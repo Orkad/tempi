@@ -44,10 +44,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Pendant la cohabitation, l'interface reste le fichier Python : une seule
-         source de vérité, aucune copie à resynchroniser. Le chemin devient
-         wwwroot/index.html au commit qui retire le Python. -->
-    <EmbeddedResource Include="../../tempi/static/index.html" LogicalName="tempi.index.html" />
+    <!-- L'interface est embarquée dans le binaire : un seul fichier à déployer,
+         et pas de chemin à résoudre à l'exécution. -->
+    <EmbeddedResource Include="wwwroot/index.html" LogicalName="tempi.index.html" />
   </ItemGroup>
 
   <ItemGroup>
