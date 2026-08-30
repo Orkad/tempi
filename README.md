@@ -9,8 +9,8 @@ ou plusieurs capteurs **DS18B20** sur un **Raspberry Pi**.
   statistiques et export CSV ;
 - **température extérieure** relevée sur une API publique et traitée comme un
   capteur supplémentaire, pour comparer l'intérieur au dehors ;
-- **aucune dépendance externe** : uniquement la bibliothèque standard de Python,
-  donc pas de compilation ni de `pip install` d'un paquet lourd sur le Pi ;
+- **binaire autonome** : un seul fichier à déposer sur le Pi, sans runtime ni
+  paquet à installer, et rien à compiler sur place ;
 - service `systemd` prêt à l'emploi.
 
 ![Interface web de tempi](docs/capture.png)
@@ -76,16 +76,38 @@ autre piste : c'est la cause de loin la plus fréquente.
 
 ## 3. Installation
 
+Un Raspberry Pi **64 bits** est nécessaire : `uname -m` doit répondre `aarch64`.
+Cela exclut les Pi 1, Zero et Zero W, dont le processeur ARMv6 n'est pas pris en
+charge par .NET, ainsi qu'un système 32 bits installé sur un Pi qui, lui, le
+serait — le script le signale avant de télécharger quoi que ce soit.
+
 ```bash
 git clone https://github.com/Orkad/tempi.git ~/tempi
+```
+
+### Installer
+
+```bash
 cd ~/tempi
 sudo ./scripts/install.sh
 ```
 
 Le script active le 1-Wire si besoin, crée l'utilisateur système `tempi`,
-installe l'application dans `/opt/tempi/venv`, dépose la configuration dans
+télécharge la dernière version publiée, vérifie son empreinte SHA-256, installe
+le binaire dans `/opt/tempi/bin/`, dépose la configuration dans
 `/etc/tempi/tempi.env` et démarre le service. Il est idempotent : le relancer
-met à jour l'installation sans écraser votre configuration.
+met à jour l'installation sans écraser votre configuration ni votre base de
+mesures.
+
+Le dépôt n'est cloné que pour les scripts et l'unité systemd. L'application
+elle-même vient de la release : elle n'est pas compilée sur le Pi.
+
+Deux variantes, quand la dernière version ne convient pas :
+
+```bash
+sudo ./scripts/install.sh v1.2.0           # une version précise
+sudo ./scripts/install.sh ./tempi.tar.gz   # artefact local, sans réseau
+```
 
 L'interface est alors disponible sur <http://127.0.0.1:8080/>. Pour la rendre
 accessible depuis le réseau local, voir la section [Accès réseau](#7-accès-réseau).
@@ -96,21 +118,25 @@ accessible depuis le réseau local, voir la section [Accès réseau](#7-accès-r
 ~/tempi/scripts/update.sh
 ```
 
-Récupère les modifications, réinstalle et redémarre le service. À lancer **sans**
-`sudo` : le dépôt appartient à votre compte, et le script appelle `sudo` lui-même
-pour la seule partie qui en a besoin. Si rien n'a changé, il s'arrête sans
-toucher au service.
+Compare la dernière version publiée à celle installée et s'arrête sans toucher
+au service si elle est déjà à jour ; sinon elle est téléchargée et le service
+redémarre. À lancer **sans** `sudo` : le script l'appelle lui-même pour la seule
+partie qui en a besoin. Comme `install.sh`, il accepte une version précise ou un
+artefact local, et `--force` réinstalle même à version égale.
+
+Un `git pull` dans `~/tempi` reste utile de temps à autre : c'est de là que
+viennent les scripts et l'unité systemd, que la release ne contient pas.
 
 ### Sans installation
 
-Le dépôt fonctionne tel quel, sans être installé :
+Le dépôt se lance tel quel depuis un poste de développement, avec le SDK .NET 10 :
 
 ```bash
-python3 -m tempi --simulate run
+dotnet run --project src/Tempi -- --simulate run
 ```
 
 L'option `--simulate` remplace le matériel par un capteur virtuel : pratique
-pour découvrir l'interface depuis un poste de développement.
+pour découvrir l'interface sans Raspberry Pi.
 
 ## 4. Utilisation
 
@@ -373,9 +399,12 @@ Un bus en défaut enregistre malgré tout des périphériques, de famille `00`.
 
 ## 10. Développement
 
+L'application est écrite en **C# / .NET 10**. Le SDK suffit, il n'y a aucun
+outillage supplémentaire à installer :
+
 ```bash
-pytest tests -q             # ou : python3 -m unittest discover -s tests -t .
-python3 -m tempi --simulate run
+dotnet test --solution src/Tempi.slnx              # toute la suite
+dotnet run --project src/Tempi -- --simulate run   # interface, capteur virtuel
 ```
 
 Le mode `--simulate` génère une température suivant un cycle journalier bruité,
@@ -383,16 +412,55 @@ ce qui permet de travailler sur l'interface sans matériel.
 
 Organisation du code :
 
-| Fichier | Rôle |
+| Répertoire | Rôle |
 |---|---|
-| `tempi/sensor.py` | lecture du bus 1-Wire, validation des trames, capteur simulé |
-| `tempi/storage.py` | schéma SQLite, écriture, requêtes, agrégation, purge |
-| `tempi/collector.py` | boucle de collecte, bande morte, rétention |
-| `tempi/outdoor.py` | température extérieure d'une API publique, exposée comme un capteur |
-| `tempi/web.py` | serveur HTTP, API JSON, export CSV |
-| `tempi/diagnostics.py` | analyse de l'état du bus, sans accès système — donc testable partout |
-| `tempi/cli.py` | ligne de commande |
-| `tempi/static/index.html` | interface web (HTML, CSS et JavaScript sans dépendance) |
+| `src/Tempi/Sensors/` | lecture du bus 1-Wire, validation des trames, capteur simulé |
+| `src/Tempi/Storage/` | schéma SQLite, écriture, requêtes, agrégation, purge |
+| `src/Tempi/Collect/` | boucle de collecte, bande morte, rétention |
+| `src/Tempi/Outdoor/` | température extérieure d'une API publique, exposée comme un capteur |
+| `src/Tempi/Web/` | serveur Kestrel, API JSON, export CSV |
+| `src/Tempi/Diagnostics/` | analyse de l'état du bus, sans accès système — donc testable partout |
+| `src/Tempi/Cli/` | ligne de commande, sondes système du `doctor` |
+| `src/Tempi/Hosting/` | hôtes de `run`, `serve` et `collect`, intégration systemd |
+| `src/Tempi/Configuration/` | variables d'environnement, validation, chemins par défaut |
+| `src/Tempi/wwwroot/index.html` | interface web (HTML, CSS et JavaScript sans dépendance), embarquée dans le binaire |
+
+### Publication
+
+L'artefact livré est autonome et trimmé — il n'embarque que le code atteint :
+
+```bash
+dotnet publish src/Tempi -c Release -r linux-arm64 --self-contained
+```
+
+Un tag `v*` déclenche `.github/workflows/release.yml`, qui produit cette archive
+et son empreinte et les attache à la release. Le trimming ne casse rien à la
+compilation : la régression n'apparaît qu'à l'exécution, et sans avertissement.
+C'est pourquoi l'intégration continue **démarre** le binaire trimmé et
+l'interroge, au lieu de se contenter de le construire.
+
+### Comportement observable
+
+tempi était écrit en Python jusqu'à la version 1.0.0. Le portage en .NET s'est
+fait sous la contrainte de ne rien déplacer de ce qui se voit du dehors : le
+fichier SQLite, l'API JSON et la ligne de commande. Les fichiers de
+`tests/golden/expected/` ont été capturés sur cette implémentation d'origine, et
+ils restent le contrat.
+
+```bash
+scripts/golden-capture.sh
+diff -r tests/golden/expected/api tests/golden/actual/api
+diff -r tests/golden/expected/cli tests/golden/actual/cli
+```
+
+Le script rejoue une liste fixe de requêtes HTTP et d'invocations de la ligne de
+commande contre `artifacts/tempi` — surchargeable par `TEMPI_CMD` — normalise ce
+qui varie d'une exécution à l'autre, et les sorties se comparent octet par octet.
+L'intégration continue le fait à chaque commit.
+
+`tests/golden/reference.db` est une base de mesures figée et versionnée, et non
+un jeu de données régénéré : le capteur simulé de Python tirait ses valeurs du
+Mersenne Twister, qu'aucune autre plateforme ne reproduit.
 
 ## Licence
 

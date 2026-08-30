@@ -11,3 +11,17 @@ venv/
 *.db
 *.db-wal
 *.db-shm
+
+# Sauf la base de référence du golden master, qui est un artefact de test versionné.
+!tests/golden/reference.db
+
+# Migration .NET
+bin/
+obj/
+artifacts/
+*.user
+
+# Golden master : la capture de l'implémentation testée, et les sorties qui
+# dépendent de la machine (doctor interroge config.txt, /proc/modules, systemctl).
+tests/golden/actual/
+tests/golden/*/machine/

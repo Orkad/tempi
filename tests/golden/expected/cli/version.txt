@@ -1,0 +1,6 @@
+$ tempi --version
+--- code de retour ---
+0
+--- stdout ---
+tempi 2.0.0
+--- stderr ---

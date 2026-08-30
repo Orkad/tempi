@@ -1,0 +1,13 @@
+$ tempi sensors
+--- code de retour ---
+0
+--- stdout ---
+
+Capteurs enregistrés dans <db> :
+  28-000005e2fdc3 « Salon »  2701 mesure(s), dernière vue 2026-01-03 00:00:00
+  28-000005e30a1b  2881 mesure(s), dernière vue 2026-01-03 00:00:00
+  28-0000ffffffff  0 mesure(s), dernière vue —
+  outdoor-metar-LFLY « Extérieur »  97 mesure(s), dernière vue 2026-01-03 00:00:00
+--- stderr ---
+Aucun capteur détecté.
+Vérifiez que le bus 1-Wire est activé et que /nonexistent existe (voir la section « Câblage » du README).

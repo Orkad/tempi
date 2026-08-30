@@ -1,0 +1,6 @@
+$ tempi read
+--- code de retour ---
+1
+--- stdout ---
+--- stderr ---
+Aucun capteur détecté.

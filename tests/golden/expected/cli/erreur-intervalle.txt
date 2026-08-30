@@ -1,0 +1,6 @@
+$ tempi collect --interval 0
+--- code de retour ---
+2
+--- stdout ---
+--- stderr ---
+tempi: error: l'intervalle de collecte doit valoir au moins 1 seconde

@@ -1,0 +1,6 @@
+$ tempi label 28-000005e2fdc3 Séjour
+--- code de retour ---
+0
+--- stdout ---
+28-000005e2fdc3 → « Séjour »
+--- stderr ---

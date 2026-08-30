@@ -2,18 +2,30 @@
 #
 # Installe tempi comme service systemd sur un Raspberry Pi.
 #
-#   sudo ./scripts/install.sh
+#   sudo ./scripts/install.sh                  # dernière version publiée
+#   sudo ./scripts/install.sh v1.2.0           # une version précise
+#   sudo ./scripts/install.sh ./tempi.tar.gz   # artefact local, sans réseau
 #
-# Le script est idempotent : on peut le relancer pour mettre à jour.
+# Le téléchargement est anonyme. Si le dépôt redevenait privé, un jeton serait
+# repris automatiquement — voir scripts/_github.sh.
+#
+# Le script est idempotent : on peut le relancer pour mettre à jour. La base de
+# mesures et /etc/tempi/tempi.env ne sont jamais touchés.
 
 set -euo pipefail
 
 PREFIX=/opt/tempi
+BIN_DIR="$PREFIX/bin"
 BIN_LINK=/usr/local/bin/tempi
 CONFIG_DIR=/etc/tempi
 SERVICE=tempi.service
 USER_NAME=tempi
+RID=linux-arm64
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck source=scripts/_github.sh
+. "$(dirname "${BASH_SOURCE[0]}")/_github.sh"
+GH_TOKEN_VALUE="$(github_token)"
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m/!\\\033[0m %s\n' "$*" >&2; }
@@ -21,12 +33,28 @@ die()  { printf '\033[1;31mErreur :\033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "ce script doit être lancé avec sudo."
 command -v systemctl >/dev/null || die "systemd est requis."
-command -v python3 >/dev/null || die "python3 est requis."
+command -v tar >/dev/null || die "tar est requis."
 
-python3 - <<'PY' || die "Python 3.9 ou plus récent est requis."
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 9) else 1)
-PY
+# --- Architecture -----------------------------------------------------------
+
+# .NET ne prend pas en charge l'ARMv6, et l'artefact publié est 64 bits. Le dire
+# franchement vaut mieux que de laisser découvrir un binaire qui ne s'exécute pas.
+case "$(uname -m)" in
+    aarch64|arm64) ;;
+    armv6l)
+        die "ARMv6 ($(uname -m)) n'est pas pris en charge par .NET : Raspberry Pi 1, Zero et Zero W sont exclus."
+        ;;
+    armv7l|armhf)
+        die "système 32 bits détecté ($(uname -m)) : installez Raspberry Pi OS 64 bits, ou restez sur la version Python."
+        ;;
+    x86_64)
+        warn "architecture $(uname -m) : l'artefact publié est arm64, l'installation va échouer."
+        warn "Utilisez « sudo ./scripts/install.sh ./chemin/vers/artefact-x64.tar.gz » avec un artefact adapté."
+        ;;
+    *)
+        die "architecture non prise en charge : $(uname -m)."
+        ;;
+esac
 
 # --- 1-Wire -----------------------------------------------------------------
 
@@ -53,6 +81,61 @@ enable_one_wire
 modprobe w1-gpio 2>/dev/null || true
 modprobe w1-therm 2>/dev/null || true
 
+# --- Récupération de l'artefact ---------------------------------------------
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+resolve_artifact() {
+    local requested="${1:-}"
+
+    # Un chemin de fichier : installation hors ligne. C'est ce qui remplace la
+    # propriété qu'avait l'ancienne installation par pip, qui ne demandait aucun
+    # accès réseau puisque le paquet n'avait aucune dépendance.
+    if [[ -n $requested && -f $requested ]]; then
+        info "Artefact local : $requested" >&2
+        printf '%s' "$requested"
+        return 0
+    fi
+
+    command -v curl >/dev/null || die "curl est requis pour télécharger une release."
+
+    if [[ -n $requested ]]; then
+        info "Version demandée : $requested" >&2
+    else
+        info "Recherche de la dernière version publiée." >&2
+    fi
+
+    local release
+    release="$(gh_release_json "$requested")" \
+        || die "release introuvable (voir la ligne ci-dessus). Section « Cloner » du README pour le jeton, ou passez un artefact local en argument."
+
+    local tag assets_url
+    tag="$(gh_json_string "$release" tag_name)"
+    assets_url="$(gh_json_string "$release" assets_url)"
+    [[ -n $tag && -n $assets_url ]] || die "réponse inattendue de l'API GitHub."
+
+    local name="tempi-$tag-$RID.tar.gz"
+
+    info "Téléchargement de $name." >&2
+    gh_download_asset "$assets_url" "$name" "$WORK/$name" \
+        || die "$name est absent de la release $tag."
+    gh_download_asset "$assets_url" SHA256SUMS "$WORK/SHA256SUMS" \
+        || die "empreintes introuvables pour $tag."
+
+    if command -v sha256sum >/dev/null; then
+        info "Vérification de l'empreinte." >&2
+        (cd "$WORK" && sha256sum --check --ignore-missing SHA256SUMS >/dev/null) \
+            || die "l'empreinte de $name ne correspond pas : téléchargement corrompu ou altéré."
+    else
+        warn "sha256sum absent : empreinte non vérifiée."
+    fi
+
+    printf '%s' "$WORK/$name"
+}
+
+ARTIFACT="$(resolve_artifact "${1:-}")"
+
 # --- Utilisateur système ----------------------------------------------------
 
 if id "$USER_NAME" &>/dev/null; then
@@ -62,26 +145,44 @@ else
     useradd --system --no-create-home --shell /usr/sbin/nologin "$USER_NAME"
 fi
 
-# --- Installation -----------------------------------------------------------
+# --- Bascule depuis l'installation Python -----------------------------------
 
-if [[ ! -x $PREFIX/venv/bin/python ]]; then
-    info "Création de l'environnement virtuel dans $PREFIX/venv."
-    mkdir -p "$PREFIX"
-    python3 -m venv "$PREFIX/venv" \
-        || die "python3-venv est manquant : sudo apt install python3-venv"
+if systemctl is-active --quiet "$SERVICE"; then was_active=yes; else was_active=no; fi
+
+if [[ -d $PREFIX/venv ]]; then
+    info "Installation Python détectée : arrêt du service avant remplacement."
+    systemctl stop "$SERVICE" 2>/dev/null || true
+    info "Suppression de $PREFIX/venv."
+    # La base de mesures est dans /var/lib/tempi et la configuration dans
+    # /etc/tempi : ni l'une ni l'autre n'est touchée. Le format du fichier SQLite
+    # est identique, il n'y a rien à convertir.
+    rm -rf "$PREFIX/venv"
 fi
 
-info "Installation de tempi depuis $REPO_DIR."
-"$PREFIX/venv/bin/pip" install --quiet --upgrade "$REPO_DIR"
+# --- Installation -----------------------------------------------------------
 
-# L'environnement virtuel n'est pas dans le PATH : sans ce lien, la commande
-# documentée « tempi sensors » répond « command not found ».
+info "Installation du binaire dans $BIN_DIR."
+rm -rf "$PREFIX/bin.new"
+install -d "$PREFIX/bin.new"
+tar -C "$PREFIX/bin.new" -xzf "$ARTIFACT" || die "archive illisible : $ARTIFACT"
+[[ -f $PREFIX/bin.new/tempi ]] || die "l'archive ne contient pas d'exécutable « tempi »."
+chmod +x "$PREFIX/bin.new/tempi"
+
+# Remplacement en deux temps : à aucun moment $BIN_DIR n'est dans un état
+# partiel, et l'ancienne version reste disponible jusqu'au dernier instant.
+rm -rf "$PREFIX/bin.old"
+[[ -d $BIN_DIR ]] && mv "$BIN_DIR" "$PREFIX/bin.old"
+mv "$PREFIX/bin.new" "$BIN_DIR"
+rm -rf "$PREFIX/bin.old"
+
+# Sans ce lien, la commande documentée « tempi sensors » répond
+# « command not found ».
 if [[ -e $BIN_LINK && ! -L $BIN_LINK ]]; then
     warn "$BIN_LINK existe déjà et n'est pas un lien symbolique : commande non installée."
-    warn "Utilisez $PREFIX/venv/bin/tempi, ou supprimez ce fichier et relancez."
+    warn "Utilisez $BIN_DIR/tempi, ou supprimez ce fichier et relancez."
 else
-    ln -sfn "$PREFIX/venv/bin/tempi" "$BIN_LINK"
-    info "Commande disponible : tempi ($BIN_LINK)"
+    ln -sfn "$BIN_DIR/tempi" "$BIN_LINK"
+    info "Commande disponible : tempi ($("$BIN_DIR/tempi" --version))"
 fi
 
 # --- Configuration ----------------------------------------------------------
@@ -95,8 +196,6 @@ else
 fi
 
 # --- Service ----------------------------------------------------------------
-
-if systemctl is-active --quiet "$SERVICE"; then was_active=yes; else was_active=no; fi
 
 info "Installation de $SERVICE."
 install -m 0644 "$REPO_DIR/deploy/$SERVICE" "/etc/systemd/system/$SERVICE"
@@ -114,8 +213,8 @@ fi
 
 sleep 2
 if systemctl is-active --quiet "$SERVICE"; then
-    port="$(grep -oP '^\s*TEMPI_PORT=\K\d+' "$CONFIG_DIR/tempi.env" 2>/dev/null || echo 8080)"
-    host="$(grep -oP '^\s*TEMPI_HOST=\K\S+' "$CONFIG_DIR/tempi.env" 2>/dev/null || echo 127.0.0.1)"
+    port="$(grep -oE '^[[:space:]]*TEMPI_PORT=[0-9]+' "$CONFIG_DIR/tempi.env" 2>/dev/null | grep -oE '[0-9]+$' || echo 8080)"
+    host="$(grep -oE '^[[:space:]]*TEMPI_HOST=[^[:space:]]+' "$CONFIG_DIR/tempi.env" 2>/dev/null | cut -d= -f2 || echo 127.0.0.1)"
     info "tempi est actif."
     if [[ $host == "0.0.0.0" || $host == "::" ]]; then
         info "Interface : http://$(hostname -I | awk '{print $1}'):$port/"
@@ -126,6 +225,7 @@ if systemctl is-active --quiet "$SERVICE"; then
     info "Journal : journalctl -u $SERVICE -f"
 else
     warn "Le service n'a pas démarré. Diagnostic : journalctl -u $SERVICE -n 50"
+    warn "Puis : sudo -u $USER_NAME $BIN_DIR/tempi doctor"
     exit 1
 fi
 
