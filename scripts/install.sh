@@ -115,7 +115,7 @@ resolve_artifact() {
 
     local release
     release="$(gh_release_json "$requested")" \
-        || die "impossible d'interroger les releases de $TEMPI_REPO (jeton absent, invalide, ou version inexistante)."
+        || die "release introuvable (voir la ligne ci-dessus). Section « Cloner » du README pour le jeton, ou passez un artefact local en argument."
 
     local tag assets_url
     tag="$(gh_json_string "$release" tag_name)"

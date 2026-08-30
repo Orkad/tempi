@@ -85,8 +85,9 @@ if [[ -z $target ]]; then
     [[ -n $GH_TOKEN_VALUE ]] \
         || die "aucun jeton GitHub trouvé (dépôt privé) : celui du clonage aurait suffi, mais git n'en a pas pour github.com. Déposez-en un dans ~/.config/tempi/github-token."
     info "Recherche de la dernière version publiée."
-    target="$(gh_json_string "$(gh_release_json "")" tag_name)" \
-        || die "impossible d'interroger les releases de $TEMPI_REPO."
+    release="$(gh_release_json "")" \
+        || die "impossible d'interroger les releases (voir la ligne ci-dessus)."
+    target="$(gh_json_string "$release" tag_name)"
     [[ -n $target ]] || die "aucune version publiée trouvée pour $TEMPI_REPO."
 fi
 

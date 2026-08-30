@@ -61,6 +61,12 @@ github_token() {
 # curl moderne retire l'en-tête Authorization quand une redirection change
 # d'hôte. C'est exactement ce qu'il faut ici : l'API redirige vers une URL signée
 # qui refuse un second mécanisme d'authentification.
+#
+# Le code HTTP est signalé sur la sortie d'erreur avant de rendre la main : un
+# script qui dit seulement « impossible d'interroger l'API » n'apprend rien,
+# alors que 401, 404 ou 403 disent chacun quoi corriger. Le message est écrit
+# ici, et pas remonté dans une variable, parce que les appelants travaillent en
+# substitution de commande — un sous-shell, d'où aucune variable ne ressort.
 gh_curl() {
     local accept="$1" url="$2"
     shift 2
@@ -68,10 +74,34 @@ gh_curl() {
     local -a auth=()
     [[ -n ${GH_TOKEN_VALUE:-} ]] && auth=(-H "Authorization: Bearer $GH_TOKEN_VALUE")
 
-    curl -fsSL "${auth[@]}" \
+    # -w ajoute le code en dernière ligne. Avec « -o », le corps part dans le
+    # fichier et il ne reste que ce code : les deux usages se traitent pareil.
+    local out status
+    out="$(curl -sSL -w '\n%{http_code}' "${auth[@]}" \
         -H "Accept: $accept" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
-        "$@" "$url"
+        "$@" "$url")" || { gh_explain "" "$url" >&2; return 1; }
+
+    status="${out##*$'\n'}"
+    if [[ $status != 2* ]]; then
+        gh_explain "$status" "$url" >&2
+        return 1
+    fi
+
+    printf '%s' "${out%$'\n'*}"
+}
+
+# Ce que le code veut dire, en clair.
+gh_explain() {
+    local message
+    case "$1" in
+        401) message="jeton refusé (expiré, ou mal recopié)" ;;
+        403) message="accès interdit : quota dépassé, ou jeton sans droit de lecture sur ce dépôt" ;;
+        404) message="introuvable : jeton absent, dépôt hors de portée du jeton, ou version inexistante" ;;
+        "")  message="pas de réponse : réseau ou résolution de noms" ;;
+        *)   message="code HTTP $1" ;;
+    esac
+    printf 'GitHub : %s\n  %s\n' "$message" "$2"
 }
 
 # gh_release_json [tag] — la dernière release publiée, ou celle d'un tag donné.
