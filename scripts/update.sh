@@ -10,8 +10,7 @@
 # À lancer SANS sudo : le script appelle sudo lui-même pour la partie qui en a
 # besoin. Il ne touche ni à la base de mesures ni à /etc/tempi/tempi.env.
 #
-# Le dépôt étant privé, la comparaison de version demande un jeton GitHub. Celui
-# qui sert au clonage est réutilisé tel quel ; à défaut, voir scripts/_github.sh.
+# La comparaison de version interroge l'API publique des releases.
 
 set -euo pipefail
 
@@ -82,8 +81,6 @@ fi
 target="$REQUESTED"
 if [[ -z $target ]]; then
     command -v curl >/dev/null || die "curl est requis pour interroger les releases."
-    [[ -n $GH_TOKEN_VALUE ]] \
-        || die "aucun jeton GitHub trouvé (dépôt privé) : celui du clonage aurait suffi, mais git n'en a pas pour github.com. Déposez-en un dans ~/.config/tempi/github-token."
     info "Recherche de la dernière version publiée."
     release="$(gh_release_json "")" \
         || die "impossible d'interroger les releases (voir la ligne ci-dessus)."

@@ -2,24 +2,10 @@
 #
 # Accès aux releases GitHub, partagé par install.sh et update.sh.
 #
-# Le dépôt est privé : sans jeton, l'API comme les artefacts répondent 404. Le
-# jeton est cherché, dans cet ordre :
-#
-#   1. la variable d'environnement GITHUB_TOKEN ;
-#   2. ~/.config/tempi/github-token — celui de l'utilisateur qui a appelé sudo,
-#      pas celui de root, pour que les deux scripts trouvent le même fichier ;
-#   3. /etc/tempi/github-token, pour une installation sans utilisateur derrière ;
-#   4. celui que git conserve déjà pour github.com.
-#
-# Le quatrième cas est le cas normal sur le Raspberry Pi : cloner un dépôt privé
-# demande déjà un jeton, et celui-là a exactement la portée qu'il faut ici. Il
-# n'y a donc rien à installer de plus.
-#
-# Aucun jeton n'est une situation valide : les appels restent anonymes, ce qui
-# suffirait si le dépôt devenait public.
-#
-# Le jeton n'a besoin que de la lecture du contenu : un jeton à portée fine avec
-# « Contents: read » sur ce dépôt, ou un jeton classique de portée « repo ».
+# Le dépôt est public : les appels sont anonymes. Un jeton reste repris s'il y en
+# a un — GITHUB_TOKEN, ~/.config/tempi/github-token, /etc/tempi/github-token, ou
+# celui que git conserve pour github.com — ce qui couvre un retour au privé et
+# relève au passage le quota de l'API.
 
 GITHUB_API=https://api.github.com
 TEMPI_REPO=Orkad/tempi

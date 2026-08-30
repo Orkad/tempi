@@ -81,36 +81,9 @@ Cela exclut les Pi 1, Zero et Zero W, dont le processeur ARMv6 n'est pas pris en
 charge par .NET, ainsi qu'un système 32 bits installé sur un Pi qui, lui, le
 serait — le script le signale avant de télécharger quoi que ce soit.
 
-### Cloner
-
-Le dépôt est privé : le téléchargement de la release demande donc un jeton
-GitHub en lecture. **En pratique il n'y a rien à faire** — cloner un dépôt privé
-en HTTPS en demande déjà un, et les scripts réutilisent celui-là :
-
 ```bash
-git config --global credential.helper store
 git clone https://github.com/Orkad/tempi.git ~/tempi
 ```
-
-Git demande l'identifiant GitHub puis le jeton, à coller à la place du mot de
-passe. Un jeton à portée fine limité à ce dépôt, avec **Contents : read**, suffit
-pour tout — le clonage comme les releases : <https://github.com/settings/personal-access-tokens/new>
-
-> `~/.git-credentials` contient le jeton **en clair**, lisible par vous seul.
-> C'est le compromis habituel sur une machine sans session graphique. Sur un Pi
-> partagé, préférez une clé SSH — et déposez alors le jeton comme ci-dessous.
-
-Trois autres emplacements sont acceptés, dans cet ordre de priorité : la variable
-`GITHUB_TOKEN`, `~/.config/tempi/github-token` (celui de l'utilisateur qui appelle
-`sudo`), puis `/etc/tempi/github-token` pour une machine sans utilisateur derrière.
-
-```bash
-mkdir -p ~/.config/tempi
-printf '%s\n' 'github_pat_…' > ~/.config/tempi/github-token
-chmod 600 ~/.config/tempi/github-token
-```
-
-Une installation depuis un artefact local ne demande aucun jeton.
 
 ### Installer
 
