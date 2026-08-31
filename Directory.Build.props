@@ -8,7 +8,15 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <NeutralLanguage>fr</NeutralLanguage>
-    <Version>1.0.0</Version>
+
+    <!-- Version SemVer (https://semver.org) du produit .NET, distincte de la 1.0.0
+         qu'a portée l'implémentation Python d'origine. Doit toujours valoir la même
+         chose que la constante `TempiVersion.Value` — VersionTests.cs le vérifie à
+         chaque build — et c'est cette dernière, pas cette propriété, que l'on
+         modifie pour préparer une release : voir sa remarque XML doc. Une release
+         (tag `vX.Y.Z`) republie cette valeur via `-p:Version` dans release.yml, qui
+         vérifie aussi qu'elle correspond au tag avant de publier. -->
+    <Version>2.0.0</Version>
 
     <!-- Économise l'embarquement d'ICU (~28 Mo) sur une carte SD. Les fuseaux
          horaires continuent de fonctionner : sous Linux ils viennent de

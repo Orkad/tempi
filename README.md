@@ -439,6 +439,22 @@ compilation : la régression n'apparaît qu'à l'exécution, et sans avertisseme
 C'est pourquoi l'intégration continue **démarre** le binaire trimmé et
 l'interroge, au lieu de se contenter de le construire.
 
+### Version
+
+Numérotée selon [SemVer](https://semver.org) (`MAJOR.MINOR.PATCH`), exposée par
+`tempi --version` et `/api/health`. Une seule source y fait autorité,
+`src/Tempi/TempiVersion.cs` — voir sa remarque XML doc pour la procédure exacte.
+En bref, pour préparer une release :
+
+1. Monter `TempiVersion.Value` à la version visée, et reporter la même valeur
+   dans la propriété `Version` de `Directory.Build.props`. `VersionTests.cs`
+   échoue sinon dès la CI normale — avant même de poser un tag.
+2. Committer, puis poser un tag `vX.Y.Z` identique (par exemple `v2.1.0` pour
+   `2.1.0`) et le pousser.
+3. `release.yml` vérifie que le tag est du SemVer valide et qu'il correspond à
+   `TempiVersion.Value` avant de publier quoi que ce soit ; sur un désaccord, la
+   release échoue plutôt que de publier un artefact mal étiqueté.
+
 ### Comportement observable
 
 tempi était écrit en Python jusqu'à la version 1.0.0. Le portage en .NET s'est
