@@ -122,6 +122,7 @@
   .tip .t { color: var(--muted); margin-bottom: .25rem; }
   .tip .row { display: flex; align-items: center; gap: .4rem; }
   .tip .swatch { width: .6rem; height: .6rem; border-radius: 2px; }
+  footer { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 1.25rem; }
 
   @media (max-width: 480px) {
     body { padding: .75rem; }
@@ -176,6 +177,8 @@
 </div>
 
 <div class="tip" id="tip"></div>
+
+<footer id="version"></footer>
 
 <script>
 "use strict";
@@ -645,6 +648,16 @@ async function loadLatest() {
   renderCards(data.sensors, data.now);
 }
 
+/** La version ne change pas en cours de session : inutile de la redemander à chaque rafraîchissement. */
+async function loadVersion() {
+  try {
+    const data = await fetchJson("api/health");
+    $("version").textContent = `tempi v${data.version}`;
+  } catch {
+    // Non bloquant : l'absence de version en pied de page ne doit pas gêner le reste de l'interface.
+  }
+}
+
 async function refresh() {
   const status = $("status");
   try {
@@ -750,6 +763,7 @@ setupHover();
 $("refresh").addEventListener("click", refresh);
 new ResizeObserver(() => drawChart()).observe($("chart"));
 refresh();
+loadVersion();
 setInterval(refresh, 30000);
 </script>
 </body>
