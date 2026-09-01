@@ -12,11 +12,37 @@ jobs:
     name: Artefact linux-arm64
     runs-on: ubuntu-latest
     steps:
+      # Échoue avant même de compiler sur un tag qui ne serait pas du SemVer
+      # (https://semver.org) sans pré-version ni métadonnées de build — le seul
+      # gabarit que produit la procédure de release documentée dans le README.
+      - name: Vérifier le format du tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if ! [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag $GITHUB_REF_NAME : \"$tag\" n'est pas un MAJOR.MINOR.PATCH SemVer." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+
+      # Garde-fou : l'artefact ne doit pas annoncer une version différente de son
+      # tag. La version exposée par « --version » et par /api/health est une
+      # constante du code — délibérément, pour que la CI n'y injecte pas le sha —
+      # donc rien ne la synchronise automatiquement avec le tag. Placé avant la
+      # compilation pour échouer sans attendre un publish trimmé complet.
+      - name: Vérifier la concordance version / tag
+        run: |
+          declared=$(grep -oP 'Value = "\K[^"]+' src/Tempi/TempiVersion.cs)
+          expected="${GITHUB_REF_NAME#v}"
+          if [ "$declared" != "$expected" ]; then
+            echo "TempiVersion.Value vaut $declared, le tag annonce $expected." >&2
+            echo "Alignez src/Tempi/TempiVersion.cs avant de publier." >&2
+            exit 1
+          fi
 
       # Le RID et --self-contained sont nommés explicitement : PublishTrimmed les
       # implique, mais sans les nommer le SDK réinvoque MSBuild par un fichier de
@@ -31,20 +57,6 @@ jobs:
             -p:Version="${GITHUB_REF_NAME#v}" \
             --output out
           file out/tempi
-
-      # Garde-fou : l'artefact ne doit pas annoncer une version différente de son
-      # tag. La version exposée par « --version » et par /api/health est une
-      # constante du code — délibérément, pour que la CI n'y injecte pas le sha —
-      # donc rien ne la synchronise automatiquement avec le tag.
-      - name: Vérifier la concordance version / tag
-        run: |
-          declared=$(grep -oP 'Value = "\K[^"]+' src/Tempi/TempiVersion.cs)
-          expected="${GITHUB_REF_NAME#v}"
-          if [ "$declared" != "$expected" ]; then
-            echo "TempiVersion.Value vaut $declared, le tag annonce $expected." >&2
-            echo "Alignez src/Tempi/TempiVersion.cs avant de publier." >&2
-            exit 1
-          fi
 
       - name: Empaqueter
         run: |
