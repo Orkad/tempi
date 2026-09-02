@@ -746,7 +746,9 @@ function setupHover() {
     tip.style.opacity = "1";
     const width = tip.offsetWidth;
     tip.style.left = Math.min(event.clientX + 14, window.innerWidth - width - 8) + "px";
-    tip.style.top = Math.min(event.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
+    // Au-dessus du point de contact plutôt qu'en dessous : au doigt, la
+    // position basse initiale masquait l'infobulle qu'elle était censée montrer.
+    tip.style.top = Math.max(8, event.clientY - tip.offsetHeight - 14) + "px";
   };
 
   const hide = () => {

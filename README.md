@@ -465,25 +465,18 @@ soit.
 ### Comportement observable
 
 tempi était écrit en Python jusqu'à la version 1.0.0. Le portage en .NET s'est
-fait sous la contrainte de ne rien déplacer de ce qui se voit du dehors : le
-fichier SQLite, l'API JSON et la ligne de commande. Les fichiers de
-`tests/golden/expected/` ont été capturés sur cette implémentation d'origine, et
-ils restent le contrat.
+fait sous la contrainte de ne rien déplacer de ce qui se voit du dehors, le
+temps de la migration ; cette contrainte a été vérifiée par un golden master
+comparant octet par octet l'API JSON et la ligne de commande à l'implémentation
+Python, retiré depuis que la migration est terminée.
 
-```bash
-scripts/golden-capture.sh
-diff -r tests/golden/expected/api tests/golden/actual/api
-diff -r tests/golden/expected/cli tests/golden/actual/cli
-```
-
-Le script rejoue une liste fixe de requêtes HTTP et d'invocations de la ligne de
-commande contre `artifacts/tempi` — surchargeable par `TEMPI_CMD` — normalise ce
-qui varie d'une exécution à l'autre, et les sorties se comparent octet par octet.
-L'intégration continue le fait à chaque commit.
-
-`tests/golden/reference.db` est une base de mesures figée et versionnée, et non
-un jeu de données régénéré : le capteur simulé de Python tirait ses valeurs du
-Mersenne Twister, qu'aucune autre plateforme ne reproduit.
+Il reste un seul contrat, celui-là irréversible : une base SQLite produite par
+le Python d'origine doit s'ouvrir sans conversion. `tests/golden/reference.db`
+en est la garante — une base de mesures figée et versionnée, et non un jeu de
+données régénéré, car le capteur simulé de Python tirait ses valeurs du
+Mersenne Twister, qu'aucune autre plateforme ne reproduit — et
+`ReferenceDatabaseTests` (`StorageTests.cs`) l'ouvre à chaque exécution des
+tests.
 
 ## Licence
 

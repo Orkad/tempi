@@ -1,6 +1,0 @@
-$ tempi label 28-absent Test
---- code de retour ---
-1
---- stdout ---
---- stderr ---
-Capteur inconnu : 28-absent

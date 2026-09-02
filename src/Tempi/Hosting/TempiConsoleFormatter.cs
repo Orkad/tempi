@@ -11,7 +11,7 @@ namespace Tempi.Hosting;
 /// <remarks>
 /// Le format Python est <c>%(asctime)s %(levelname)-7s %(name)s: %(message)s</c> avec
 /// <c>datefmt="%Y-%m-%dT%H:%M:%S"</c>. Le niveau est cadré sur sept colonnes, ce qui
-/// aligne les messages quel que soit le niveau — et ce que le golden master compare.
+/// aligne les messages quel que soit le niveau.
 /// </remarks>
 internal sealed class TempiConsoleFormatter() : ConsoleFormatter(FormatterName)
 {

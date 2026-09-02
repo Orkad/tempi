@@ -8,8 +8,8 @@ name: Livraison continue
 # Les commits et le tag que ce workflow pousse utilisent le jeton par défaut
 # GITHUB_TOKEN, que GitHub Actions ne fait volontairement pas redéclencher
 # d'autres workflows — sans quoi ce push retaguerait indéfiniment. C'est aussi
-# pourquoi ce job revalide lui-même le bump (build, tests, golden master) avant
-# de committer : ci.yml ne le fera pas pour lui.
+# pourquoi ce job revalide lui-même le bump (build, tests) avant de committer :
+# ci.yml ne le fera pas pour lui.
 
 on:
   push:
@@ -67,8 +67,6 @@ jobs:
 
           sed -i "s/$escaped/$next/" src/Tempi/TempiVersion.cs
           sed -i "s/$escaped/$next/" Directory.Build.props
-          sed -i "s/$escaped/$next/" tests/golden/expected/api/health.json
-          sed -i "s/$escaped/$next/" tests/golden/expected/cli/version.txt
 
       # Revalide le bump (ou, si rien n'a changé ici, le commit humain qui a déjà
       # monté la version) juste avant de publier — ci.yml ne rejouera pas ce
@@ -77,11 +75,6 @@ jobs:
         run: |
           dotnet build src/Tempi.slnx --configuration Release
           dotnet test --solution src/Tempi.slnx --configuration Release --no-build
-          dotnet publish src/Tempi/Tempi.csproj --configuration Release \
-            -p:PublishTrimmed=false -p:SelfContained=false --output "$RUNNER_TEMP/dotnet"
-          TEMPI_CMD="$(command -v dotnet) $RUNNER_TEMP/dotnet/tempi.dll" ./scripts/golden-capture.sh
-          diff -r tests/golden/expected/api tests/golden/actual/api
-          diff -r tests/golden/expected/cli tests/golden/actual/cli
 
       - name: Committer et taguer
         run: |

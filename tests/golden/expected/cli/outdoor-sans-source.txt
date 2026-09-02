@@ -1,6 +1,0 @@
-$ tempi outdoor
---- code de retour ---
-2
---- stdout ---
---- stderr ---
-Aucune source extérieure configurée : précisez --outdoor-provider ou TEMPI_OUTDOOR_PROVIDER (metar, infoclimat, open-meteo).

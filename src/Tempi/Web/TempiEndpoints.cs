@@ -262,7 +262,7 @@ public static partial class TempiEndpoints
 
         // Python écrit les en-têtes de l'export à la main et n'y pose pas
         // Cache-Control, contrairement à toutes les autres réponses. Reproduire cette
-        // asymétrie n'a l'air de rien, mais c'est ce que compare le golden master.
+        // asymétrie n'a l'air de rien, mais c'est un choix délibéré et non un oubli.
         context.Response.Headers.Remove("Cache-Control");
 
         if (context.Request.Method != HttpMethods.Head)
