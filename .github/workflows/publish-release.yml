@@ -1,4 +1,4 @@
-name: Publier une release
+name: Publish Release
 
 # Workflow réutilisable : compile l'artefact linux-arm64 pour le tag donné et le
 # publie comme release GitHub. Appelé par release.yml (tag `v*` poussé à la main)
