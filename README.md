@@ -433,27 +433,34 @@ L'artefact livré est autonome et trimmé — il n'embarque que le code atteint 
 dotnet publish src/Tempi -c Release -r linux-arm64 --self-contained
 ```
 
-Un tag `v*` déclenche `.github/workflows/release.yml`, qui produit cette archive
-et son empreinte et les attache à la release. Le trimming ne casse rien à la
-compilation : la régression n'apparaît qu'à l'exécution, et sans avertissement.
-C'est pourquoi l'intégration continue **démarre** le binaire trimmé et
-l'interroge, au lieu de se contenter de le construire.
+Un tag `v*` produit cette archive et son empreinte et les attache à une release
+GitHub, via `publish-release.yml`. Le trimming ne casse rien à la compilation : la
+régression n'apparaît qu'à l'exécution, et sans avertissement. C'est pourquoi
+l'intégration continue **démarre** le binaire trimmé et l'interroge, au lieu de se
+contenter de le construire.
 
 ### Version
 
 Numérotée selon [SemVer](https://semver.org) (`MAJOR.MINOR.PATCH`), exposée par
 `tempi --version` et `/api/health`. Une seule source y fait autorité,
-`src/Tempi/TempiVersion.cs` — voir sa remarque XML doc pour la procédure exacte.
-En bref, pour préparer une release :
+`src/Tempi/TempiVersion.cs` — voir sa remarque XML doc pour la règle complète.
 
-1. Monter `TempiVersion.Value` à la version visée, et reporter la même valeur
-   dans la propriété `Version` de `Directory.Build.props`. `VersionTests.cs`
-   échoue sinon dès la CI normale — avant même de poser un tag.
-2. Committer, puis poser un tag `vX.Y.Z` identique (par exemple `v2.1.0` pour
-   `2.1.0`) et le pousser.
-3. `release.yml` vérifie que le tag est du SemVer valide et qu'il correspond à
-   `TempiVersion.Value` avant de publier quoi que ce soit ; sur un désaccord, la
-   release échoue plutôt que de publier un artefact mal étiqueté.
+La livraison est continue : `continuous-release.yml` publie une release à chaque
+push sur `main`, sans étape manuelle.
+
+- Rien à faire pour un correctif : si `TempiVersion.Value` n'a pas changé depuis
+  la dernière release, le workflow incrémente le PATCH tout seul, committe,
+  tague et publie.
+- Pour un bump MINOR (nouvelle fonctionnalité visible) ou MAJOR (changement
+  cassant), montez `TempiVersion.Value` à la main dans la PR — et reportez la
+  même valeur dans la propriété `Version` de `Directory.Build.props`
+  (`VersionTests.cs` échoue sinon dès la CI normale). Le workflow détecte que la
+  constante a déjà bougé et respecte cette valeur plutôt que d'incrémenter.
+
+Dans les deux cas, `publish-release.yml` (appelé par `continuous-release.yml`, et
+par `release.yml` pour un tag posé à la main) vérifie que le tag est du SemVer
+valide et qu'il correspond à `TempiVersion.Value` avant de publier quoi que ce
+soit.
 
 ### Comportement observable
 

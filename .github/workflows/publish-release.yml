@@ -1,0 +1,95 @@
+name: Publier une release
+
+# Workflow réutilisable : compile l'artefact linux-arm64 pour le tag donné et le
+# publie comme release GitHub. Appelé par release.yml (tag `v*` poussé à la main)
+# et par continuous-release.yml (tag posé automatiquement à chaque push sur main).
+# Toute la logique de publication vit ici pour n'exister qu'à un seul endroit.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag vX.Y.Z à publier, déjà poussé sur le dépôt"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  arm64:
+    name: Artefact linux-arm64
+    runs-on: ubuntu-latest
+    steps:
+      # Échoue avant même de compiler sur un tag qui ne serait pas du SemVer
+      # (https://semver.org) sans pré-version ni métadonnées de build — le seul
+      # gabarit que produit la procédure de release documentée dans le README.
+      - name: Résoudre la version
+        id: vars
+        run: |
+          version="${{ inputs.tag }}"
+          version="${version#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag ${{ inputs.tag }} : \"$version\" n'est pas un MAJOR.MINOR.PATCH SemVer." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Garde-fou : l'artefact ne doit pas annoncer une version différente de son
+      # tag. La version exposée par « --version » et par /api/health est une
+      # constante du code — délibérément, pour que la CI n'y injecte pas le sha —
+      # donc rien ne la synchronise automatiquement avec le tag, hormis ce contrôle.
+      # Placé avant la compilation pour échouer sans attendre un publish trimmé complet.
+      - name: Vérifier la concordance version / tag
+        run: |
+          declared=$(grep -oP 'Value = "\K[^"]+' src/Tempi/TempiVersion.cs)
+          if [ "$declared" != "${{ steps.vars.outputs.version }}" ]; then
+            echo "TempiVersion.Value vaut $declared, le tag annonce ${{ steps.vars.outputs.version }}." >&2
+            exit 1
+          fi
+
+      # Le RID et --self-contained sont nommés explicitement : PublishTrimmed les
+      # implique, mais sans les nommer le SDK réinvoque MSBuild par un fichier de
+      # réponse et lui passe le projet deux fois.
+      - name: Publier
+        run: |
+          dotnet publish src/Tempi/Tempi.csproj \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained \
+            -p:PublishTrimmed=true \
+            -p:Version="${{ steps.vars.outputs.version }}" \
+            --output out
+          file out/tempi
+
+      - name: Empaqueter
+        run: |
+          tar -C out -czf "tempi-${{ inputs.tag }}-linux-arm64.tar.gz" .
+          sha256sum tempi-*.tar.gz > SHA256SUMS
+          ls -la tempi-*.tar.gz SHA256SUMS
+
+      # Le binaire est arm64 et le runner x64 : son démarrage ne peut pas être
+      # vérifié ici. C'est le job « Golden master » de la CI qui couvre ce risque,
+      # en démarrant l'équivalent x64 trimmé — le trimming se comporte de la même
+      # façon sur les deux architectures. Le premier démarrage réel reste celui du
+      # Raspberry Pi.
+      - name: Attacher à la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ inputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ inputs.tag }}" tempi-*.tar.gz SHA256SUMS --clobber
+          else
+            gh release create "${{ inputs.tag }}" \
+              --title "${{ inputs.tag }}" \
+              --generate-notes \
+              tempi-*.tar.gz SHA256SUMS
+          fi

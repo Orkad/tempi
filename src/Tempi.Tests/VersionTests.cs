@@ -4,13 +4,16 @@ namespace Tempi.Tests;
 
 public sealed class VersionTests
 {
+    /// <summary>
+    /// continuous-release.yml monte cette constante à chaque push sur main — un
+    /// littéral figé ici devrait être réédité à chaque publication, ce qui irait à
+    /// l'encontre de l'automatisation. Seul le format compte : c'est lui que
+    /// s'appuient release.yml et l'incrément de patch automatique.
+    /// </summary>
     [Fact]
-    public void La_version_est_celle_que_le_tag_de_release_devra_porter()
+    public void La_version_est_un_gabarit_SemVer_MAJOR_MINOR_PATCH()
     {
-        // release.yml refuse de publier un tag qui ne correspond pas à cette
-        // constante : c'est ici, et nulle part ailleurs, que la version se change.
-        // /api/health et « --version » l'exposent, et le golden master la compare.
-        Assert.Equal("2.1.0", TempiVersion.Value);
+        Assert.Matches(@"^\d+\.\d+\.\d+$", TempiVersion.Value);
     }
 
     /// <summary>
