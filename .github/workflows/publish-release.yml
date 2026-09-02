@@ -77,7 +77,7 @@ jobs:
           ls -la tempi-*.tar.gz SHA256SUMS
 
       # Le binaire est arm64 et le runner x64 : son démarrage ne peut pas être
-      # vérifié ici. C'est le job « Golden master » de la CI qui couvre ce risque,
+      # vérifié ici. C'est le job « Binaire trimmé » de la CI qui couvre ce risque,
       # en démarrant l'équivalent x64 trimmé — le trimming se comporte de la même
       # façon sur les deux architectures. Le premier démarrage réel reste celui du
       # Raspberry Pi.

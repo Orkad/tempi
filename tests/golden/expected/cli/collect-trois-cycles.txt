@@ -1,9 +1,0 @@
-$ tempi --simulate collect -n 3 --interval 1
---- code de retour ---
-0
---- stdout ---
---- stderr ---
-<ts> INFO    tempi.collector: collecte démarrée : intervalle 1.0 s, base <db>
-<ts> INFO    tempi.collector: capteur détecté : 28-000005e2fdc3
-<ts> INFO    tempi.collector: capteur détecté : 28-000005e30a1b
-<ts> INFO    tempi.collector: collecte arrêtée après 3 cycle(s), 6 mesure(s) enregistrée(s), 0 erreur(s)

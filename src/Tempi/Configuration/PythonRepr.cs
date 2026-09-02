@@ -9,9 +9,9 @@ namespace Tempi.Configuration;
 /// <remarks>
 /// Les messages d'erreur de <c>config.py</c> interpolent la valeur fautive avec
 /// <c>{raw!r}</c>, ce qui l'entoure d'apostrophes. Ces messages remontent jusqu'à
-/// l'utilisateur et sont comparés par le golden master : les reproduire suppose
-/// d'imiter la règle de Python, qui bascule sur des guillemets doubles lorsque la
-/// chaîne contient une apostrophe mais pas de guillemet.
+/// l'utilisateur : les reproduire suppose d'imiter la règle de Python, qui bascule
+/// sur des guillemets doubles lorsque la chaîne contient une apostrophe mais pas de
+/// guillemet.
 /// </remarks>
 internal static class PythonRepr
 {

@@ -8,8 +8,8 @@ namespace Tempi.Sensors;
 /// mesure, ce qui donne des courbes réalistes dans l'interface web. Les valeurs ne
 /// reproduisent pas celles du bus simulé Python : celui-ci s'appuie sur le Mersenne
 /// Twister de <c>random.Random</c>, qu'aucune autre plateforme n'imite. Ce n'est pas
-/// un contrat — le test Python ne vérifiait que la plausibilité de la valeur — et le
-/// golden master s'appuie sur une base figée plutôt que sur ce générateur.
+/// un contrat — le test Python ne vérifiait que la plausibilité de la valeur — et les
+/// tests de référence s'appuient sur une base figée plutôt que sur ce générateur.
 /// </remarks>
 public sealed class SimulatedBus : ITemperatureBus
 {

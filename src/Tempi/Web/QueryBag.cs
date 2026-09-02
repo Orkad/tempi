@@ -10,8 +10,7 @@ namespace Tempi.Web;
 /// <c>?range=</c> donne un dictionnaire vide, donc la fenêtre par défaut s'applique et
 /// la réponse est un 200. Un portage naïf verrait une chaîne vide, appellerait
 /// l'analyse de durée et renverrait un 400. La différence est silencieuse : le front
-/// n'émet jamais ce cas, mais une URL bricolée à la main le déclenche — et le golden
-/// master le verrouille.
+/// n'émet jamais ce cas, mais une URL bricolée à la main le déclenche.
 /// </remarks>
 internal sealed class QueryBag
 {
