@@ -16,7 +16,7 @@
          modifie pour préparer une release : voir sa remarque XML doc. Une release
          (tag `vX.Y.Z`) republie cette valeur via `-p:Version` dans release.yml, qui
          vérifie aussi qu'elle correspond au tag avant de publier. -->
-    <Version>2.1.2</Version>
+    <Version>2.1.3</Version>
 
     <!-- Économise l'embarquement d'ICU (~28 Mo) sur une carte SD. Les fuseaux
          horaires continuent de fonctionner : sous Linux ils viennent de
