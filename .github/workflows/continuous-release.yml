@@ -1,4 +1,4 @@
-name: Livraison continue
+name: Continuous Release
 
 # Publie automatiquement une release à chaque push sur main : voir la section
 # « Version » du README et la remarque XML doc de TempiVersion.cs pour la règle de
