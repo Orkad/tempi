@@ -16,5 +16,5 @@ namespace Tempi;
 /// </remarks>
 internal static class TempiVersion
 {
-    public const string Value = "2.0.0";
+    public const string Value = "2.1.0";
 }

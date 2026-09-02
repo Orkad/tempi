@@ -10,7 +10,7 @@ public sealed class VersionTests
         // release.yml refuse de publier un tag qui ne correspond pas à cette
         // constante : c'est ici, et nulle part ailleurs, que la version se change.
         // /api/health et « --version » l'exposent, et le golden master la compare.
-        Assert.Equal("2.0.0", TempiVersion.Value);
+        Assert.Equal("2.1.0", TempiVersion.Value);
     }
 
     /// <summary>
